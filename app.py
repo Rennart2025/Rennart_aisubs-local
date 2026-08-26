@@ -20,6 +20,7 @@ import webview
 from webview import FileDialog
 
 import pipeline as pipeline_mod
+import transcribe as transcribe_mod
 import mediaserver
 import fontlist
 from lib.manual_jobs import ManualJobService
@@ -226,15 +227,45 @@ class Api:
     # ---------- system info ----------
 
     def get_gpu_info(self):
+        """The card, and whether transcription can actually use it.
+
+        nvidia-smi only proves a driver is installed. A run also needs a CUDA
+        build that sees the device, the cuBLAS/cuDNN libraries, and a compute
+        type the card supports - and when any of those is missing the job
+        quietly lands on the CPU. Reporting only the name put a green light
+        over CPU-speed work and left the cause invisible.
+        """
+        name = None
         try:
             out = subprocess.run(
                 ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
                 capture_output=True, text=True, timeout=5,
             )
-            name = out.stdout.strip().splitlines()[0] if out.returncode == 0 and out.stdout.strip() else None
-            return {"available": bool(name), "name": name}
+            if out.returncode == 0 and out.stdout.strip():
+                name = out.stdout.strip().splitlines()[0]
         except Exception:
-            return {"available": False, "name": None}
+            name = None
+
+        if not name:
+            return {"available": False, "usable": False, "name": None,
+                    "compute_type": None, "reason": None}
+
+        compute_types = transcribe_mod.cuda_compute_types()
+        missing = transcribe_mod.missing_cuda_libraries()
+        if not compute_types:
+            reason = "CUDA недоступна — распознавание пойдёт на процессоре"
+        elif missing:
+            reason = "нет " + " и ".join(missing) + " — запустите setup.bat"
+        else:
+            reason = None
+
+        return {
+            "available": True,
+            "usable": reason is None,
+            "name": name,
+            "compute_type": compute_types[0] if compute_types else None,
+            "reason": reason,
+        }
 
     # ---------- pipeline ----------
 

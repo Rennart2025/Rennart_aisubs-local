@@ -52,7 +52,7 @@ Say "============================================" "Cyan"
 Say ""
 Say "Будет скачано:"
 Say "  • Python и ffmpeg          ~600 МБ"
-Say "  • библиотеки CUDA          ~550 МБ (только при видеокарте NVIDIA)"
+Say "  • библиотеки CUDA          ~1.2 ГБ (только при видеокарте NVIDIA)"
 Say "  • модель распознавания     0.5–3 ГБ (можно выбрать или пропустить)"
 Say ""
 
@@ -112,19 +112,29 @@ if (Test-Path (Join-Path $Root "ffmpeg\ffmpeg.exe")) {
 }
 
 # ------------------------------------------------------------------ CUDA ----
-# cuBLAS is loaded by name at runtime and is NOT part of the NVIDIA driver;
-# without it everything silently falls back to the CPU.
+# cuBLAS and cuDNN are loaded by name at runtime and are NOT part of the NVIDIA
+# driver; without them everything silently falls back to the CPU.
 $hasGpu = $null -ne (Get-Command nvidia-smi -ErrorAction SilentlyContinue)
 if (-not $hasGpu) {
     Say "[5/6] Видеокарта NVIDIA не найдена — пропускаю библиотеки CUDA." "DarkGray"
     Say "      Распознавание будет работать на процессоре." "DarkGray"
 } else {
-    & $Py -c "import nvidia.cublas" 2>$null
-    if ($LASTEXITCODE -eq 0) {
+    # The probe asks whether the libraries are importable instead of importing
+    # them, and its output is never redirected. A redirect makes PowerShell turn
+    # a native command's stderr into a NativeCommandError, so under
+    # ErrorActionPreference = Stop the traceback from a plain
+    # `import nvidia.cublas` aborted the whole installer - on exactly the
+    # machines that had not got the libraries yet, which is when this branch is
+    # supposed to install them.
+    $probe = "import importlib.util as u;n=u.find_spec('nvidia');print(int(bool(n) and all(u.find_spec(m) for m in ('nvidia.cublas','nvidia.cudnn'))))"
+    $installed = "0"
+    try { $installed = (& $Py -c $probe | Select-Object -Last 1) } catch { $installed = "0" }
+
+    if ($installed -eq "1") {
         Say "[5/6] Библиотеки CUDA уже установлены — пропускаю." "DarkGray"
     } else {
-        Say "[5/6] Видеокарта NVIDIA найдена. Скачиваю библиотеки CUDA (~550 МБ)..." "White"
-        & $Py -m pip install --no-warn-script-location nvidia-cublas-cu12
+        Say "[5/6] Видеокарта NVIDIA найдена. Скачиваю библиотеки CUDA (~1.2 ГБ)..." "White"
+        & $Py -m pip install --no-warn-script-location nvidia-cublas-cu12 nvidia-cudnn-cu12
         if ($LASTEXITCODE -ne 0) {
             Say "      Не получилось. Распознавание пойдёт на процессоре;" "Yellow"
             Say "      установку можно повторить, запустив setup.bat снова." "Yellow"

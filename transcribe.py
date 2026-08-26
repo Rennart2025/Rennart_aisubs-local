@@ -145,6 +145,65 @@ def _download_with_progress(model_size, models_dir, progress_cb, log=print):
         progress_cb("downloading_model", 100)
 
 
+# Fastest first. float16 is the best option on Volta and newer; Pascal cards
+# (GTX 10xx) have no usable fp16 path but do have int8 dot products, so
+# int8_float32 is what keeps them on the GPU instead of on the CPU. float32 is
+# the last resort every CUDA device can run.
+CUDA_COMPUTE_TYPES = ("float16", "int8_float16", "int8_float32", "float32")
+
+# The CUDA libraries ctranslate2 loads by name at runtime. Neither ships with
+# the NVIDIA driver. The version suffix moves with the wheel, so accept any of
+# the ones this app could be paired with.
+CUDA_RUNTIME_LIBS = (
+    ("cuBLAS", ("cublas64_12.dll", "cublas64_13.dll", "cublas64_11.dll")),
+    ("cuDNN", ("cudnn64_9.dll", "cudnn64_8.dll")),
+)
+
+
+def cuda_compute_types():
+    """Compute types this machine's GPU accepts, fastest first.
+
+    None means the GPU cannot be used at all - no CUDA build, no driver, no
+    device. An empty list never happens in practice but is not treated as
+    usable either.
+
+    Asking the library matters: ctranslate2 refuses float16 below compute
+    capability 7.0, because a GTX 1070 runs fp16 at 1/64 rate. Requesting it
+    there fails outright rather than merely being slow, and a caller that only
+    knows float16 concludes the card is unusable and drops the whole job to the
+    CPU.
+    """
+    try:
+        from ctranslate2 import get_supported_compute_types
+        supported = get_supported_compute_types("cuda")
+    except Exception:
+        return None
+    return [t for t in CUDA_COMPUTE_TYPES if t in supported]
+
+
+def _can_load_library(name):
+    import ctypes
+    try:
+        ctypes.CDLL(name)
+        return True
+    except OSError:
+        return False
+
+
+def missing_cuda_libraries():
+    """CUDA libraries ctranslate2 needs here but cannot load.
+
+    Loading them by name asks the question the same way ctranslate2 will, so it
+    covers both the pip packages (enable_bundled_cuda_libs put those on the DLL
+    search path) and a system-wide CUDA Toolkit. Otherwise a missing library
+    surfaces only as a failed model load in the middle of a job.
+    """
+    if os.name != "nt":
+        return []  # the app ships on Windows, and only there are the names stable
+    return [label for label, candidates in CUDA_RUNTIME_LIBS
+            if not any(_can_load_library(name) for name in candidates)]
+
+
 def _load_model(model_size, device, compute_type, download_root):
     from faster_whisper import WhisperModel
     return WhisperModel(model_size, device=device, compute_type=compute_type, download_root=download_root)
@@ -152,7 +211,9 @@ def _load_model(model_size, device, compute_type, download_root):
 def load_model_with_fallback(model_size="large-v3", download_root=None, prefer_device="auto", log=print):
     attempts = []
     if prefer_device in ("auto", "cuda"):
-        attempts.append(("cuda", "float16"))
+        # Fall back to the full list when the device cannot be queried, so the
+        # load attempts below report the real error instead of this guess.
+        attempts.extend(("cuda", t) for t in (cuda_compute_types() or CUDA_COMPUTE_TYPES))
     if prefer_device in ("auto", "cpu"):
         attempts.append(("cpu", "int8"))
 

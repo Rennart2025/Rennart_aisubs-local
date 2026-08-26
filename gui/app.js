@@ -828,12 +828,24 @@ function updateModelHint() {
 }
 
 async function refreshGpuBadge() {
+  const dot = $("gpuDot"), label = $("gpuLabel");
+  const IDLE = "var(--text-dim)";
+  const paint = (text, color, hint) => {
+    label.textContent = text;
+    label.title = hint || "";
+    dot.style.background = color;
+    dot.style.boxShadow = color === IDLE ? "none" : `0 0 8px ${color}`;
+  };
   try {
     const info = await api().get_gpu_info();
-    $("gpuLabel").textContent = info.name ? `${info.name}` : "CPU режим";
-    $("gpuDot").style.background = info.available ? "var(--good)" : "#9099b0";
+    if (!info.name) return paint("CPU режим", IDLE);
+    // A detected card is not a usable card: without the CUDA libraries, or on
+    // a card whose compute types the model cannot use, the run lands on the
+    // processor anyway. Green over CPU-speed work is what hid that.
+    if (info.usable) return paint(`${info.name} · ${info.compute_type}`, "var(--good)");
+    paint(`${info.name} — CPU режим`, "var(--warn)", info.reason);
   } catch (e) {
-    $("gpuLabel").textContent = "CPU режим";
+    paint("CPU режим", IDLE);
   }
 }
 
