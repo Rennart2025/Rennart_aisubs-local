@@ -105,3 +105,123 @@ test("returns no overlay definitions while all switches are off", () => {
 
   assert.deepEqual(overlayDefinitions(createState()), []);
 });
+
+test("scales the manual margin range to half of the source frame height", () => {
+  const marginRangeMax = requireApi("marginRangeMax");
+
+  assert.equal(marginRangeMax(1920), 960);
+  assert.equal(marginRangeMax(3840), 1920);
+  assert.equal(marginRangeMax(0), 960);
+});
+
+test("snaps a bottom caption fully inside the TikTok guide including visual bleed", () => {
+  const createState = requireApi("createState");
+  const setEnabled = requireApi("setEnabled");
+  const safeMarginFor = requireApi("safeMarginFor");
+  const state = setEnabled(createState(), "tiktok", true);
+
+  assert.equal(safeMarginFor(state, "bottom", 1920, {
+    highlight_style: "box",
+    box_padding_y: 10,
+    stroke_width: 0,
+    shadow_enabled: true,
+    shadow_blur: 6,
+    shadow_offset: [0, 3],
+  }), 412);
+});
+
+test("uses the strictest active guide when several zones overlap", () => {
+  const createState = requireApi("createState");
+  const setEnabled = requireApi("setEnabled");
+  const safeMarginFor = requireApi("safeMarginFor");
+  let state = createState();
+  state = setEnabled(state, "tiktok", true);
+  state = setEnabled(state, "reels", true);
+  state = setEnabled(state, "shorts", true);
+
+  assert.equal(safeMarginFor(state, "bottom", 1920, {
+    highlight_style: "box",
+    box_padding_y: 10,
+    stroke_width: 0,
+    shadow_enabled: true,
+    shadow_blur: 6,
+    shadow_offset: [0, 3],
+  }), 451);
+});
+
+test("stores the strictest active edge as a normalized render rule", () => {
+  const createState = requireApi("createState");
+  const setEnabled = requireApi("setEnabled");
+  const strictestInsetRatio = requireApi("strictestInsetRatio");
+  let state = createState();
+  state = setEnabled(state, "tiktok", true);
+  state = setEnabled(state, "reels", true);
+
+  assert.equal(strictestInsetRatio(state, "bottom"), 0.22);
+  assert.equal(strictestInsetRatio(state, "top"), 0.10);
+});
+
+test("resolves one safe style independently for every frame height", () => {
+  const effectiveMargin = requireApi("effectiveMargin");
+  const style = {
+    position: "bottom",
+    position_margin: 190,
+    position_mode: "safe",
+    position_safe_inset_ratio: 0.22,
+    highlight_style: "none",
+    stroke_width: 0,
+    shadow_enabled: false,
+  };
+
+  assert.equal(effectiveMargin(style, 1920), 423);
+  assert.equal(effectiveMargin(style, 3840), 845);
+});
+
+test("falls back to manual pixels for invalid safe positioning data", () => {
+  const effectiveMargin = requireApi("effectiveMargin");
+
+  assert.equal(effectiveMargin({
+    position: "bottom",
+    position_margin: 317,
+    position_mode: "safe",
+    position_safe_inset_ratio: 0.75,
+  }, 3840), 317);
+  assert.equal(effectiveMargin({ position: "center", position_margin: 91 }, 1920), 91);
+});
+
+test("accounts for the renderer blur footprint and directional shadow offset", () => {
+  const visualOverflow = requireApi("visualOverflow");
+  const style = {
+    highlight_style: "box",
+    box_padding_y: 10,
+    stroke_width: 2,
+    shadow_enabled: true,
+    shadow_blur: 20,
+    shadow_offset: [0, 4],
+  };
+
+  assert.equal(visualOverflow(style, "bottom"), 64);
+  assert.equal(visualOverflow(style, "top"), 60);
+});
+
+test("does not offer vertical snapping without a guide or at center position", () => {
+  const createState = requireApi("createState");
+  const setEnabled = requireApi("setEnabled");
+  const safeMarginFor = requireApi("safeMarginFor");
+  const state = setEnabled(createState(), "tiktok", true);
+
+  assert.equal(safeMarginFor(createState(), "bottom", 1920, {}), null);
+  assert.equal(safeMarginFor(state, "center", 1920, {}), null);
+});
+
+test("enables snapping only for an active guide on a vertical video", () => {
+  const canSnapMargin = requireApi("canSnapMargin");
+  const createState = requireApi("createState");
+  const setEnabled = requireApi("setEnabled");
+  const active = setEnabled(createState(), "tiktok", true);
+
+  assert.equal(canSnapMargin(active, "bottom", 1080, 1920), true);
+  assert.equal(canSnapMargin(active, "center", 1080, 1920), false);
+  assert.equal(canSnapMargin(active, "bottom", 1920, 1080), false);
+  assert.equal(canSnapMargin(createState(), "bottom", 1080, 1920), false);
+});

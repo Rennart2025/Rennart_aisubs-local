@@ -55,5 +55,74 @@
     return relativeError <= 0.005;
   }
 
-  return { activePlatforms, createState, isVerticalFormat, overlayDefinitions, setEnabled };
+  function marginRangeMax(videoHeight, requiredMargin) {
+    const sourceHeight = videoHeight > 0 ? videoHeight : 1920;
+    return Math.max(400, Math.ceil(sourceHeight / 2), Math.ceil(requiredMargin || 0));
+  }
+
+  function validInsetRatio(value) {
+    return Number.isFinite(value) && value >= 0 && value <= 0.5 ? value : null;
+  }
+
+  function strictestInsetRatio(state, position) {
+    if (position !== "top" && position !== "bottom") return null;
+    const guides = overlayDefinitions(state);
+    if (!guides.length) return null;
+    return Math.max(...guides.map((guide) => guide.inset[position])) / 100;
+  }
+
+  function visualOverflow(style, position) {
+    const value = style || {};
+    const boxBleed = value.highlight_style === "box" ? Math.max(0, Number(value.box_padding_y) || 0) : 0;
+    const strokeBleed = Math.max(0, Number(value.stroke_width) || 0);
+    let shadowBleed = 0;
+    if (value.shadow_enabled) {
+      const offsetY = Array.isArray(value.shadow_offset) ? Number(value.shadow_offset[1]) || 0 : 0;
+      const directionalOffset = position === "top" ? Math.max(0, -offsetY) : Math.max(0, offsetY);
+      const blurFootprint = Math.ceil(2.5 * Math.max(0, Number(value.shadow_blur) || 0));
+      shadowBleed = blurFootprint + directionalOffset;
+    }
+    return Math.max(boxBleed, strokeBleed) + shadowBleed;
+  }
+
+  function effectiveMargin(style, videoHeight) {
+    const value = style || {};
+    const manualValue = Number(value.position_margin);
+    const manual = Number.isFinite(manualValue) ? Math.max(0, manualValue) : 0;
+    const insetRatio = validInsetRatio(value.position_safe_inset_ratio);
+    if (value.position_mode !== "safe"
+        || insetRatio === null
+        || (value.position !== "top" && value.position !== "bottom")
+        || !(videoHeight > 0)) {
+      return manual;
+    }
+    return Math.max(0, Math.ceil(videoHeight * insetRatio + visualOverflow(value, value.position)));
+  }
+
+  function safeMarginFor(state, position, videoHeight, style) {
+    if (!(videoHeight > 0) || (position !== "top" && position !== "bottom")) return null;
+    const insetRatio = strictestInsetRatio(state, position);
+    if (insetRatio === null) return null;
+    return Math.ceil(videoHeight * insetRatio + visualOverflow(style, position));
+  }
+
+  function canSnapMargin(state, position, videoWidth, videoHeight) {
+    return activePlatforms(state).length > 0
+      && (position === "top" || position === "bottom")
+      && isVerticalFormat(videoWidth, videoHeight);
+  }
+
+  return {
+    activePlatforms,
+    canSnapMargin,
+    createState,
+    effectiveMargin,
+    isVerticalFormat,
+    marginRangeMax,
+    overlayDefinitions,
+    safeMarginFor,
+    setEnabled,
+    strictestInsetRatio,
+    visualOverflow,
+  };
 });
