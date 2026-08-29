@@ -13,6 +13,7 @@ import os
 import re
 import json
 import time
+import math
 import hashlib
 import threading
 import subprocess
@@ -57,6 +58,32 @@ def resolve(token):
         return _registry.get(token)
 
 
+def _numeric_rotation(value):
+    try:
+        rotation = float(value)
+    except (TypeError, ValueError):
+        return None
+    return rotation if math.isfinite(rotation) else None
+
+
+def _stream_rotation(stream):
+    for item in stream.get("side_data_list") or []:
+        rotation = _numeric_rotation(item.get("rotation"))
+        if rotation is not None:
+            return rotation
+    return _numeric_rotation((stream.get("tags") or {}).get("rotate"))
+
+
+def _display_dimensions(width, height, rotation):
+    rotation = _numeric_rotation(rotation)
+    if rotation is None:
+        return width, height
+    normalized = rotation % 360
+    if abs(normalized - 90) <= 0.5 or abs(normalized - 270) <= 0.5:
+        return height, width
+    return width, height
+
+
 def probe(path):
     """Returns {width, height, duration, fps} for a video, cached by mtime."""
     path = os.path.abspath(path)
@@ -70,18 +97,22 @@ def probe(path):
     try:
         out = subprocess.run(
             [FFPROBE, "-v", "error", "-select_streams", "v:0",
-             "-show_entries", "stream=width,height,r_frame_rate",
-             "-show_entries", "format=duration",
+             "-show_entries", "stream=width,height,r_frame_rate:stream_tags=rotate:stream_side_data=rotation:format=duration",
              "-of", "json", path],
             capture_output=True, text=True, timeout=30, startupinfo=_no_window(),
         )
         data = json.loads(out.stdout or "{}")
         stream = (data.get("streams") or [{}])[0]
+        width, height = _display_dimensions(
+            int(stream.get("width") or 0),
+            int(stream.get("height") or 0),
+            _stream_rotation(stream),
+        )
         num, _, den = (stream.get("r_frame_rate") or "0/1").partition("/")
         fps = float(num) / float(den) if den and float(den) else 0.0
         info = {
-            "width": int(stream.get("width") or 0),
-            "height": int(stream.get("height") or 0),
+            "width": width,
+            "height": height,
             "duration": float((data.get("format") or {}).get("duration") or 0),
             "fps": round(fps, 3),
         }
