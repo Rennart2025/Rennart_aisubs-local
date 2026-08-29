@@ -61,7 +61,17 @@
   }
 
   function validInsetRatio(value) {
-    return Number.isFinite(value) && value >= 0 && value <= 0.5 ? value : null;
+    if (value === null || typeof value === "boolean") return null;
+    if (typeof value === "string" && !value.trim()) return null;
+    const ratio = Number(value);
+    return Number.isFinite(ratio) && ratio >= 0 && ratio <= 0.5 ? ratio : null;
+  }
+
+  function isSafePosition(style) {
+    const value = style || {};
+    return value.position_mode === "safe"
+      && (value.position === "top" || value.position === "bottom")
+      && validInsetRatio(value.position_safe_inset_ratio) !== null;
   }
 
   function strictestInsetRatio(state, position) {
@@ -90,10 +100,7 @@
     const manualValue = Number(value.position_margin);
     const manual = Number.isFinite(manualValue) ? Math.max(0, manualValue) : 0;
     const insetRatio = validInsetRatio(value.position_safe_inset_ratio);
-    if (value.position_mode !== "safe"
-        || insetRatio === null
-        || (value.position !== "top" && value.position !== "bottom")
-        || !(videoHeight > 0)) {
+    if (!isSafePosition(value) || insetRatio === null || !(videoHeight > 0)) {
       return manual;
     }
     return Math.max(0, Math.ceil(videoHeight * insetRatio + visualOverflow(value, value.position)));
@@ -139,6 +146,7 @@
     canSnapMargin,
     createState,
     effectiveMargin,
+    isSafePosition,
     isVerticalFormat,
     marginRangeMax,
     overlayDefinitions,

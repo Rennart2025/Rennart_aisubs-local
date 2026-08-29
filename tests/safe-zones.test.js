@@ -189,6 +189,41 @@ test("falls back to manual pixels for invalid safe positioning data", () => {
   assert.equal(effectiveMargin({ position: "center", position_margin: 91 }, 1920), 91);
 });
 
+test("normalizes numeric preset strings but rejects boolean inset values", () => {
+  const effectiveMargin = requireApi("effectiveMargin");
+  const isSafePosition = requireApi("isSafePosition");
+  const base = {
+    position: "bottom",
+    position_margin: 190,
+    position_mode: "safe",
+    highlight_style: "none",
+    stroke_width: 0,
+    shadow_enabled: false,
+  };
+
+  const imported = { ...base, position_safe_inset_ratio: "0.22" };
+  assert.equal(effectiveMargin(imported, 1920), 423);
+  assert.equal(isSafePosition(imported), true);
+  assert.equal(isSafePosition({ ...base, position_safe_inset_ratio: false }), false);
+  assert.equal(effectiveMargin({ ...base, position_safe_inset_ratio: false }, 1920), 190);
+  assert.equal(effectiveMargin({ ...base, position_safe_inset_ratio: true }, 1920), 190);
+});
+
+test("keeps fractional visual overflow in parity with the renderer", () => {
+  const effectiveMargin = requireApi("effectiveMargin");
+
+  assert.equal(effectiveMargin({
+    position: "bottom",
+    position_margin: 190,
+    position_mode: "safe",
+    position_safe_inset_ratio: 0.22,
+    highlight_style: "box",
+    box_padding_y: 10.2,
+    stroke_width: 0,
+    shadow_enabled: false,
+  }, 1920), 433);
+});
+
 test("accounts for the renderer blur footprint and directional shadow offset", () => {
   const visualOverflow = requireApi("visualOverflow");
   const style = {

@@ -387,11 +387,7 @@ function renderSafeZones() {
     sourceHeight,
   );
   snapButton.disabled = !canSnap;
-  const safeActive = style.position_mode === "safe"
-    && Number.isFinite(style.position_safe_inset_ratio)
-    && style.position_safe_inset_ratio >= 0
-    && style.position_safe_inset_ratio <= 0.5
-    && (style.position === "top" || style.position === "bottom");
+  const safeActive = SafeZones.isSafePosition(style);
   snapButton.setAttribute("aria-pressed", safeActive ? "true" : "false");
 
   let snapHint = "Включите безопасную зону под предпросмотром";

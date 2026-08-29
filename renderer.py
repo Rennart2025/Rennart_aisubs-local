@@ -250,6 +250,8 @@ def _word_gap_for(style):
     return style["box_padding_x"] * 1.6 if style["highlight_style"] == "box" else 0
 
 def _valid_safe_inset(value):
+    if isinstance(value, bool):
+        return None
     try:
         ratio = float(value)
     except (TypeError, ValueError):
@@ -261,14 +263,14 @@ def _visual_overflow(style, position):
         if style.get("highlight_style") == "box" else 0.0
     stroke = max(0.0, float(style.get("stroke_width", 0) or 0))
     if not style.get("shadow_enabled"):
-        return math.ceil(max(pill, stroke))
+        return max(pill, stroke)
 
     blur = math.ceil(2.5 * max(0.0, float(style.get("shadow_blur", 0) or 0)))
     offset_value = style.get("shadow_offset")
     offset_y = float(offset_value[1] or 0) \
         if isinstance(offset_value, (list, tuple)) and len(offset_value) > 1 else 0.0
     directional_offset = max(0.0, -offset_y) if position == "top" else max(0.0, offset_y)
-    return math.ceil(max(pill, stroke) + blur + directional_offset)
+    return max(pill, stroke) + blur + directional_offset
 
 def _effective_position_margin(style, video_h):
     try:
