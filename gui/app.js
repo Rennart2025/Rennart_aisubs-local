@@ -110,6 +110,7 @@ let lastOutputPath = null;
 let presets = [];
 let isRunning = false;
 let appMode = "auto";
+let safeZoneState = SafeZones.createState();
 
 const $ = (id) => document.getElementById(id);
 
@@ -186,6 +187,14 @@ function setupBindings() {
   setupToggleGroup("positionGroup", (val) => {
     style.position = val;
     updatePreview();
+  });
+
+  document.querySelectorAll(".safe-zone-toggle").forEach((button) => {
+    button.addEventListener("click", () => {
+      const platform = button.dataset.platform;
+      safeZoneState = SafeZones.setEnabled(safeZoneState, platform, !safeZoneState[platform]);
+      renderSafeZones();
+    });
   });
 
   $("dropzone").addEventListener("click", pickVideos);
@@ -301,6 +310,32 @@ function updatePreview() {
   });
 
   trimToLineCount(line);
+}
+
+function renderSafeZones() {
+  const layer = $("safeZoneLayer");
+  layer.innerHTML = "";
+
+  SafeZones.overlayDefinitions(safeZoneState).forEach((guide) => {
+    const frame = document.createElement("div");
+    frame.className = "safe-zone-frame";
+    frame.dataset.platform = guide.id;
+    frame.style.inset = `${guide.inset.top}% ${guide.inset.right}% ${guide.inset.bottom}% ${guide.inset.left}%`;
+
+    const label = document.createElement("span");
+    label.className = "safe-zone-label";
+    label.textContent = guide.label;
+    frame.appendChild(label);
+    layer.appendChild(frame);
+  });
+
+  document.querySelectorAll(".safe-zone-toggle").forEach((button) => {
+    button.setAttribute("aria-pressed", safeZoneState[button.dataset.platform] ? "true" : "false");
+  });
+
+  const hasActiveGuide = SafeZones.activePlatforms(safeZoneState).length > 0;
+  const wrongFormat = previewVideo && !SafeZones.isVerticalFormat(previewVideo.width, previewVideo.height);
+  $("safeZoneFormatHint").classList.toggle("hidden", !(hasActiveGuide && wrongFormat));
 }
 
 // ---------------- fonts ----------------
@@ -543,6 +578,7 @@ function applyStageGeometry() {
     stage.style.height = Math.round(h) + "px";
   }
   updatePreview();
+  renderSafeZones();
 }
 
 function setStageFrame(url) {
@@ -856,6 +892,7 @@ function init() {
   if (typeof initManualMode === "function") initManualMode();
   applyStyleToControls();
   applyStageGeometry();
+  renderSafeZones();
   loadPresets();
   loadFonts();
   refreshGpuBadge();

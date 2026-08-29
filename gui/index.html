@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <title>AISubs</title>
 <style>
+/* Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V4 */
 @font-face { font-family: "Montserrat"; src: url("../fonts/Montserrat-var.ttf"); font-weight: 100 900; }
 @font-face { font-family: "Oswald"; src: url("../fonts/Oswald-var.ttf"); font-weight: 200 700; }
 @font-face { font-family: "Rubik"; src: url("../fonts/Rubik-var.ttf"); font-weight: 300 900; }
@@ -32,6 +33,12 @@
   --good: #2be55b;
   --warn: #ffb020;
   --danger: #ff4d5e;
+  --safe-tiktok: #35e4c1;
+  --safe-tiktok-fill: rgba(53,228,193,.10);
+  --safe-reels: #ff5bbd;
+  --safe-reels-fill: rgba(255,91,189,.09);
+  --safe-shorts: #ff705f;
+  --safe-shorts-fill: rgba(255,112,95,.09);
   --radius: 14px;
 }
 
@@ -318,12 +325,14 @@ input[type=color]::-webkit-color-swatch{ border-radius:6px; border:none; }
   display:flex; flex-wrap:wrap; gap:0.3em; justify-content:center;
   padding: 0; max-width:100%;
   line-height:1.15;
+  position:relative; z-index:5;
 }
 .preview-word{ white-space:nowrap; }
 
 /* The area text may occupy: max_width_ratio wide, line_count lines tall. */
 .text-box{
   position:absolute;
+  z-index:5;
   border:1px dashed rgba(79,178,255,.55);
   border-radius:3px;
   pointer-events:none;
@@ -340,6 +349,47 @@ input[type=color]::-webkit-color-swatch{ border-radius:6px; border:none; }
   color:var(--text-dim); font-size:12.5px; text-align:center; padding:0 24px; pointer-events:none;
 }
 .preview-stage:not(.no-frame) .preview-empty{ display:none; }
+.safe-zone-layer{
+  position:absolute; inset:0; overflow:hidden; pointer-events:none; z-index:4;
+}
+.safe-zone-frame{
+  position:absolute;
+  border:1px solid var(--safe-zone-color);
+  box-shadow:0 0 0 100vmax var(--safe-zone-fill);
+}
+.safe-zone-frame[data-platform="tiktok"]{ --safe-zone-color:var(--safe-tiktok); --safe-zone-fill:var(--safe-tiktok-fill); }
+.safe-zone-frame[data-platform="reels"]{ --safe-zone-color:var(--safe-reels); --safe-zone-fill:var(--safe-reels-fill); }
+.safe-zone-frame[data-platform="shorts"]{ --safe-zone-color:var(--safe-shorts); --safe-zone-fill:var(--safe-shorts-fill); }
+.safe-zone-label{
+  position:absolute; top:3px; left:4px; padding:2px 5px;
+  border-radius:4px; background:var(--bg); color:var(--safe-zone-color);
+  font-size:9px; font-weight:700; line-height:1; letter-spacing:.02em;
+}
+.safe-zone-frame[data-platform="reels"] .safe-zone-label{ left:50%; transform:translateX(-50%); }
+.safe-zone-frame[data-platform="shorts"] .safe-zone-label{ left:auto; right:4px; }
+.safe-zone-controls{ margin-top:10px; text-align:center; }
+.safe-zone-controls-head{ display:flex; align-items:baseline; justify-content:center; gap:8px; margin-bottom:7px; }
+.safe-zone-controls-title{ color:var(--text); font-size:11.5px; font-weight:700; }
+.safe-zone-controls-note{ color:var(--text-dim); font-size:10.5px; }
+.safe-zone-options{ display:flex; justify-content:center; gap:6px; flex-wrap:wrap; }
+.safe-zone-toggle{
+  display:inline-flex; align-items:center; gap:6px; min-height:30px; padding:5px 9px;
+  border:1px solid var(--border); border-radius:8px; background:var(--panel-2);
+  color:var(--text-dim); cursor:pointer; font:inherit; font-size:11px; white-space:nowrap;
+}
+.safe-zone-toggle:hover{ border-color:var(--safe-zone-color); color:var(--text); }
+.safe-zone-toggle:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+.safe-zone-toggle:active{ transform:translateY(1px); }
+.safe-zone-toggle[aria-pressed="true"]{
+  border-color:var(--safe-zone-color); color:var(--text);
+  box-shadow:inset 0 0 0 1px var(--safe-zone-color);
+}
+.safe-zone-toggle:disabled{ opacity:.45; cursor:not-allowed; }
+.safe-zone-toggle[data-platform="tiktok"]{ --safe-zone-color:var(--safe-tiktok); }
+.safe-zone-toggle[data-platform="reels"]{ --safe-zone-color:var(--safe-reels); }
+.safe-zone-toggle[data-platform="shorts"]{ --safe-zone-color:var(--safe-shorts); }
+.safe-zone-dot{ width:7px; height:7px; border-radius:50%; background:var(--safe-zone-color); }
+.safe-zone-format-hint{ display:block; margin-top:6px; color:var(--warn); font-size:10.5px; }
 
 /* ---------- run bar ---------- */
 .footer{
@@ -457,12 +507,25 @@ input[type=color]::-webkit-color-swatch{ border-radius:6px; border:none; }
       <div class="preview-holder" id="previewHolder">
         <div class="preview-stage no-frame" id="previewStage">
           <div class="preview-empty">Добавьте видео — предпросмотр покажет кадр из него<br>с субтитрами в выбранном стиле</div>
+          <div class="safe-zone-layer" id="safeZoneLayer" aria-hidden="true"></div>
           <div class="text-box" id="textBox"><span class="text-box-size" id="textBoxSize"></span></div>
           <div class="preview-line" id="previewLine"></div>
         </div>
       </div>
       <div style="text-align:center; color:var(--text-dim); font-size:11.5px; margin-top:10px;">
         <span id="previewHint">Кадр из видео в масштабе 1:1 — так субтитры лягут на самом деле</span>
+      </div>
+      <div class="safe-zone-controls">
+        <div class="safe-zone-controls-head">
+          <span class="safe-zone-controls-title">Безопасные зоны</span>
+          <span class="safe-zone-controls-note">только предпросмотр</span>
+        </div>
+        <div class="safe-zone-options" role="group" aria-label="Безопасные зоны социальных сетей" aria-describedby="safeZoneFormatHint">
+          <button class="safe-zone-toggle" type="button" data-platform="tiktok" aria-pressed="false"><span class="safe-zone-dot"></span>TikTok</button>
+          <button class="safe-zone-toggle" type="button" data-platform="reels" aria-pressed="false"><span class="safe-zone-dot"></span>Reels</button>
+          <button class="safe-zone-toggle" type="button" data-platform="shorts" aria-pressed="false"><span class="safe-zone-dot"></span>Shorts</button>
+        </div>
+        <span class="safe-zone-format-hint hidden" id="safeZoneFormatHint" role="status" aria-live="polite">Разметка рассчитана на вертикальное видео 9:16</span>
       </div>
 
       <div class="section" style="margin-top:22px;">
@@ -651,6 +714,7 @@ input[type=color]::-webkit-color-swatch{ border-radius:6px; border:none; }
 <script src="manual-state.js"></script>
 <script src="manual-review.js"></script>
 <script src="creator-channel.js"></script>
+<script src="safe-zones.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
