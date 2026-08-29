@@ -61,7 +61,7 @@
   }
 
   function validInsetRatio(value) {
-    if (value === null || typeof value === "boolean") return null;
+    if (typeof value !== "number" && typeof value !== "string") return null;
     if (typeof value === "string" && !value.trim()) return null;
     const ratio = Number(value);
     return Number.isFinite(ratio) && ratio >= 0 && ratio <= 0.5 ? ratio : null;

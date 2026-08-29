@@ -52,6 +52,12 @@ class EffectivePositionMarginTests(unittest.TestCase):
         self.assertEqual(renderer._effective_position_margin(
             dict(style, position_safe_inset_ratio=True), 1920,
         ), 190)
+        self.assertEqual(renderer._effective_position_margin(
+            dict(style, position_safe_inset_ratio=[]), 1920,
+        ), 190)
+        self.assertEqual(renderer._effective_position_margin(
+            dict(style, position_safe_inset_ratio=[0.22]), 1920,
+        ), 190)
 
     def test_fractional_visual_overflow_matches_browser_rounding(self):
         style = copy.deepcopy(renderer.DEFAULT_STYLE)

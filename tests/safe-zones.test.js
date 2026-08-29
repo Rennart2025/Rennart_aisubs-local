@@ -207,6 +207,8 @@ test("normalizes numeric preset strings but rejects boolean inset values", () =>
   assert.equal(isSafePosition({ ...base, position_safe_inset_ratio: false }), false);
   assert.equal(effectiveMargin({ ...base, position_safe_inset_ratio: false }, 1920), 190);
   assert.equal(effectiveMargin({ ...base, position_safe_inset_ratio: true }, 1920), 190);
+  assert.equal(effectiveMargin({ ...base, position_safe_inset_ratio: [] }, 1920), 190);
+  assert.equal(effectiveMargin({ ...base, position_safe_inset_ratio: [0.22] }, 1920), 190);
 });
 
 test("keeps fractional visual overflow in parity with the renderer", () => {
