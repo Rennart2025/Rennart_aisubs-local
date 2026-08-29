@@ -12,6 +12,7 @@ import os
 import sys
 import json
 import copy
+import math
 
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from moviepy import VideoFileClip, ImageClip, CompositeVideoClip
@@ -248,6 +249,40 @@ def _word_gap_for(style):
     """Pill highlights bleed box_padding_x past each side of the active word."""
     return style["box_padding_x"] * 1.6 if style["highlight_style"] == "box" else 0
 
+def _valid_safe_inset(value):
+    try:
+        ratio = float(value)
+    except (TypeError, ValueError):
+        return None
+    return ratio if math.isfinite(ratio) and 0.0 <= ratio <= 0.5 else None
+
+def _visual_overflow(style, position):
+    pill = max(0.0, float(style.get("box_padding_y", 0) or 0)) \
+        if style.get("highlight_style") == "box" else 0.0
+    stroke = max(0.0, float(style.get("stroke_width", 0) or 0))
+    if not style.get("shadow_enabled"):
+        return math.ceil(max(pill, stroke))
+
+    blur = math.ceil(2.5 * max(0.0, float(style.get("shadow_blur", 0) or 0)))
+    offset_value = style.get("shadow_offset")
+    offset_y = float(offset_value[1] or 0) \
+        if isinstance(offset_value, (list, tuple)) and len(offset_value) > 1 else 0.0
+    directional_offset = max(0.0, -offset_y) if position == "top" else max(0.0, offset_y)
+    return math.ceil(max(pill, stroke) + blur + directional_offset)
+
+def _effective_position_margin(style, video_h):
+    try:
+        manual = max(0, int(float(style.get("position_margin", 0) or 0)))
+    except (TypeError, ValueError, OverflowError):
+        manual = 0
+
+    ratio = _valid_safe_inset(style.get("position_safe_inset_ratio"))
+    position = style.get("position")
+    if (style.get("position_mode") != "safe" or ratio is None
+            or position not in {"top", "bottom"} or video_h <= 0):
+        return manual
+    return max(0, math.ceil(video_h * ratio + _visual_overflow(style, position)))
+
 def _layout_line(draw, words, font, stroke_width, extra_gap=0):
     space_w, _ = _measure(draw, " ", font, stroke_width)
     space_w += extra_gap
@@ -274,10 +309,11 @@ def _render_state_image(video_w, video_h, lines, active_line_idx, active_word_id
     line_height = int((ascent + descent) * style["line_spacing"])
     block_height = line_height * len(lines)
 
+    position_margin = _effective_position_margin(style, video_h)
     if style["position"] == "bottom":
-        block_top = video_h - style["position_margin"] - block_height
+        block_top = video_h - position_margin - block_height
     elif style["position"] == "top":
-        block_top = style["position_margin"]
+        block_top = position_margin
     else:
         block_top = video_h // 2 - block_height // 2
 
