@@ -390,6 +390,19 @@ input[type=color]::-webkit-color-swatch{ border-radius:6px; border:none; }
 .safe-zone-toggle[data-platform="shorts"]{ --safe-zone-color:var(--safe-shorts); }
 .safe-zone-dot{ width:7px; height:7px; border-radius:50%; background:var(--safe-zone-color); }
 .safe-zone-format-hint{ display:block; margin-top:6px; color:var(--warn); font-size:10.5px; }
+.position-margin-head{ display:flex; align-items:center; gap:8px; margin-top:16px; }
+.position-margin-head label{ flex:1; margin:0; }
+.safe-zone-snap{
+  flex:0 0 auto; min-height:32px; padding:4px 8px; white-space:nowrap;
+  border:1px solid var(--border); border-radius:8px; background:var(--panel-2);
+  color:var(--text); cursor:pointer; font:inherit; font-size:11px; font-weight:700;
+}
+.safe-zone-snap:hover{ border-color:var(--accent); }
+.safe-zone-snap:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+.safe-zone-snap:active{ background:var(--panel); color:var(--text); }
+.safe-zone-snap[aria-pressed="true"]{ border-color:var(--accent); background:rgba(77,208,187,.12); color:var(--text); }
+.safe-zone-snap:disabled{ opacity:.45; cursor:not-allowed; }
+.safe-zone-snap-hint{ min-height:1.4em; }
 
 /* ---------- run bar ---------- */
 .footer{
@@ -643,8 +656,12 @@ input[type=color]::-webkit-color-swatch{ border-radius:6px; border:none; }
           <button data-val="center">Центр</button>
           <button data-val="bottom" class="active">Низ</button>
         </div>
-        <label>Отступ от края <span class="range-val" id="v_position_margin">190</span></label>
-        <input type="range" id="s_position_margin" min="20" max="400" value="190">
+        <div class="position-margin-head">
+          <label for="s_position_margin">Отступ от края <span class="range-val" id="v_position_margin">190</span></label>
+          <button class="safe-zone-snap" id="snapSafeZoneMargin" type="button" aria-pressed="false" aria-describedby="safeZoneSnapHint" disabled>По зоне</button>
+        </div>
+        <input type="range" id="s_position_margin" min="20" max="960" value="190">
+        <div class="field-hint safe-zone-snap-hint" id="safeZoneSnapHint" role="status" aria-live="polite">Включите безопасную зону под предпросмотром</div>
 
         <label>Строк максимум <span class="range-val" id="v_line_count">1</span></label>
         <input type="range" id="s_line_count" min="1" max="4" value="1">

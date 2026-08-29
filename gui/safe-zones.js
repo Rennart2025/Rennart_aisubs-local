@@ -99,6 +99,26 @@
     return Math.max(0, Math.ceil(videoHeight * insetRatio + visualOverflow(value, value.position)));
   }
 
+  function activateSafePosition(style, insetRatio, videoHeight) {
+    const validRatio = validInsetRatio(insetRatio);
+    if (validRatio === null) return activateManualPosition(style, style && style.position_margin);
+    const next = Object.assign({}, style, {
+      position_mode: "safe",
+      position_safe_inset_ratio: validRatio,
+    });
+    next.position_margin = effectiveMargin(next, videoHeight);
+    return next;
+  }
+
+  function activateManualPosition(style, margin) {
+    const number = Number(margin);
+    return Object.assign({}, style, {
+      position_mode: "manual",
+      position_safe_inset_ratio: null,
+      position_margin: Number.isFinite(number) ? Math.max(0, number) : 0,
+    });
+  }
+
   function safeMarginFor(state, position, videoHeight, style) {
     if (!(videoHeight > 0) || (position !== "top" && position !== "bottom")) return null;
     const insetRatio = strictestInsetRatio(state, position);
@@ -113,6 +133,8 @@
   }
 
   return {
+    activateManualPosition,
+    activateSafePosition,
     activePlatforms,
     canSnapMargin,
     createState,

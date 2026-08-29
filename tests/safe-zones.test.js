@@ -204,6 +204,55 @@ test("accounts for the renderer blur footprint and directional shadow offset", (
   assert.equal(visualOverflow(style, "top"), 60);
 });
 
+test("activates a normalized safe rule while keeping compatibility pixels", () => {
+  const activateSafePosition = requireApi("activateSafePosition");
+  const original = {
+    position: "bottom",
+    position_margin: 190,
+    highlight_style: "none",
+    stroke_width: 0,
+    shadow_enabled: false,
+  };
+
+  const activated = activateSafePosition(original, 0.22, 1920);
+
+  assert.equal(activated.position_mode, "safe");
+  assert.equal(activated.position_safe_inset_ratio, 0.22);
+  assert.equal(activated.position_margin, 423);
+  assert.equal(original.position_mode, undefined);
+});
+
+test("manual input clears the safe rule and preserves exact slider pixels", () => {
+  const activateManualPosition = requireApi("activateManualPosition");
+  const style = {
+    position: "bottom",
+    position_margin: 451,
+    position_mode: "safe",
+    position_safe_inset_ratio: 0.22,
+  };
+
+  const manual = activateManualPosition(style, 777);
+
+  assert.equal(manual.position_mode, "manual");
+  assert.equal(manual.position_safe_inset_ratio, null);
+  assert.equal(manual.position_margin, 777);
+});
+
+test("changing preview resolution recalculates pixels without changing the saved inset", () => {
+  const activateSafePosition = requireApi("activateSafePosition");
+  const effectiveMargin = requireApi("effectiveMargin");
+  const style = activateSafePosition({
+    position: "bottom",
+    position_margin: 190,
+    highlight_style: "none",
+    stroke_width: 0,
+    shadow_enabled: false,
+  }, 0.22, 1920);
+
+  assert.equal(effectiveMargin(style, 3840), 845);
+  assert.equal(style.position_safe_inset_ratio, 0.22);
+});
+
 test("does not offer vertical snapping without a guide or at center position", () => {
   const createState = requireApi("createState");
   const setEnabled = requireApi("setEnabled");

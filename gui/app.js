@@ -100,6 +100,8 @@ const DEFAULT_STYLE = {
   line_spacing: 1.18,
   position: "bottom",
   position_margin: 190,
+  position_mode: "manual",
+  position_safe_inset_ratio: null,
 };
 
 let style = Object.assign({}, DEFAULT_STYLE);
@@ -127,6 +129,7 @@ function bindRange(id, valId, key, fmt) {
     style[key] = fmt ? fmt(raw) : raw;
     $(valId).textContent = fmt ? Math.round(raw) : raw;
     updatePreview();
+    renderSafeZones();
   });
 }
 
@@ -161,7 +164,11 @@ function setupBindings() {
   bindRange("s_stroke_width", "v_stroke_width", "stroke_width");
   bindColor("s_stroke_color", "s_stroke_color_hex", "stroke_color");
 
-  $("s_shadow_enabled").addEventListener("change", () => { style.shadow_enabled = $("s_shadow_enabled").checked; updatePreview(); });
+  $("s_shadow_enabled").addEventListener("change", () => {
+    style.shadow_enabled = $("s_shadow_enabled").checked;
+    updatePreview();
+    renderSafeZones();
+  });
   bindRange("s_shadow_blur", "v_shadow_blur", "shadow_blur");
   bindRange("s_shadow_opacity", "v_shadow_opacity", "shadow_opacity", (v) => v / 100);
 
@@ -173,7 +180,12 @@ function setupBindings() {
 
   bindColor("s_word_highlight_color", "s_word_highlight_color_hex", "word_highlight_color");
 
-  bindRange("s_position_margin", "v_position_margin", "position_margin");
+  $("s_position_margin").addEventListener("input", () => {
+    style = SafeZones.activateManualPosition(style, parseFloat($("s_position_margin").value));
+    $("v_position_margin").textContent = style.position_margin;
+    updatePreview();
+    renderSafeZones();
+  });
   bindRange("s_line_count", "v_line_count", "line_count");
   bindRange("s_max_width_ratio", "v_max_width_ratio", "max_width_ratio", (v) => v / 100);
 
@@ -182,11 +194,30 @@ function setupBindings() {
     $("boxParams").classList.toggle("hidden", val !== "box");
     $("colorParams").classList.toggle("hidden", val !== "color");
     updatePreview();
+    renderSafeZones();
   });
 
   setupToggleGroup("positionGroup", (val) => {
+    const sourceHeight = previewVideo && previewVideo.height;
+    style = SafeZones.activateManualPosition(style, SafeZones.effectiveMargin(style, sourceHeight));
     style.position = val;
     updatePreview();
+    renderSafeZones();
+  });
+
+  $("snapSafeZoneMargin").addEventListener("click", () => {
+    if (!previewVideo || !SafeZones.canSnapMargin(
+      safeZoneState,
+      style.position,
+      previewVideo.width,
+      previewVideo.height,
+    )) return;
+
+    const insetRatio = SafeZones.strictestInsetRatio(safeZoneState, style.position);
+    if (insetRatio === null) return;
+    style = SafeZones.activateSafePosition(style, insetRatio, previewVideo.height);
+    updatePreview();
+    renderSafeZones();
   });
 
   document.querySelectorAll(".safe-zone-toggle").forEach((button) => {
@@ -234,7 +265,9 @@ function applyStyleToControls() {
 
   $("s_word_highlight_color").value = style.word_highlight_color; $("s_word_highlight_color_hex").value = style.word_highlight_color.toUpperCase();
 
-  $("s_position_margin").value = style.position_margin; $("v_position_margin").textContent = style.position_margin;
+  const sourceHeight = previewVideo && previewVideo.height;
+  const effectiveMargin = SafeZones.effectiveMargin(style, sourceHeight);
+  $("s_position_margin").value = effectiveMargin; $("v_position_margin").textContent = effectiveMargin;
   $("s_line_count").value = style.line_count; $("v_line_count").textContent = style.line_count;
   const mwr = Math.round(style.max_width_ratio * 100);
   $("s_max_width_ratio").value = mwr; $("v_max_width_ratio").textContent = mwr;
@@ -243,6 +276,7 @@ function applyStyleToControls() {
   setActiveToggle("positionGroup", style.position);
   $("boxParams").classList.toggle("hidden", style.highlight_style !== "box");
   $("colorParams").classList.toggle("hidden", style.highlight_style !== "color");
+  renderSafeZones();
 }
 
 function setActiveToggle(groupId, val) {
@@ -276,13 +310,14 @@ function updatePreview() {
     : "none";
   line.style.setProperty("-webkit-text-stroke", style.stroke_width > 0 ? `${style.stroke_width*scale}px ${style.stroke_color}` : "0px transparent");
 
-  // Margins are in source pixels, same as the renderer treats them.
+  // Manual margins are source pixels; safe margins are resolved for this frame.
+  const effectiveMargin = SafeZones.effectiveMargin(style, previewVideo && previewVideo.height);
   stage.style.alignItems = style.position === "top" ? "flex-start" : style.position === "center" ? "center" : "flex-end";
-  line.style.marginBottom = style.position === "bottom" ? (style.position_margin * scale) + "px" : "0px";
-  line.style.marginTop = style.position === "top" ? (style.position_margin * scale) + "px" : "0px";
+  line.style.marginBottom = style.position === "bottom" ? (effectiveMargin * scale) + "px" : "0px";
+  line.style.marginTop = style.position === "top" ? (effectiveMargin * scale) + "px" : "0px";
   line.style.maxWidth = (style.max_width_ratio * 100) + "%";
 
-  updateTextBox(stage, line, scale, videoWidth);
+  updateTextBox(stage, line, scale, videoWidth, effectiveMargin);
 
   line.innerHTML = "";
   words.forEach((w, i) => {
@@ -336,6 +371,41 @@ function renderSafeZones() {
   const hasActiveGuide = SafeZones.activePlatforms(safeZoneState).length > 0;
   const wrongFormat = previewVideo && !SafeZones.isVerticalFormat(previewVideo.width, previewVideo.height);
   $("safeZoneFormatHint").classList.toggle("hidden", !(hasActiveGuide && wrongFormat));
+
+  const range = $("s_position_margin");
+  const sourceHeight = previewVideo && previewVideo.height;
+  const effectiveMargin = SafeZones.effectiveMargin(style, sourceHeight);
+  range.max = SafeZones.marginRangeMax(sourceHeight, effectiveMargin);
+  range.value = effectiveMargin;
+  $("v_position_margin").textContent = effectiveMargin;
+
+  const snapButton = $("snapSafeZoneMargin");
+  const canSnap = Boolean(previewVideo) && SafeZones.canSnapMargin(
+    safeZoneState,
+    style.position,
+    previewVideo && previewVideo.width,
+    sourceHeight,
+  );
+  snapButton.disabled = !canSnap;
+  const safeActive = style.position_mode === "safe"
+    && Number.isFinite(style.position_safe_inset_ratio)
+    && style.position_safe_inset_ratio >= 0
+    && style.position_safe_inset_ratio <= 0.5
+    && (style.position === "top" || style.position === "bottom");
+  snapButton.setAttribute("aria-pressed", safeActive ? "true" : "false");
+
+  let snapHint = "Включите безопасную зону под предпросмотром";
+  if (!previewVideo) snapHint = safeActive
+    ? "Безопасный режим сохранён; загрузите видео для расчёта"
+    : "Загрузите вертикальное видео 9:16";
+  else if (!hasActiveGuide) snapHint = safeActive
+    ? `Безопасный отступ ${effectiveMargin} px; включите зону для проверки`
+    : "Включите безопасную зону под предпросмотром";
+  else if (style.position === "center") snapHint = "Для позиции «Центр» отступ не применяется";
+  else if (wrongFormat) snapHint = "Привязка доступна для видео 9:16";
+  else if (safeActive) snapHint = `Безопасный отступ ${effectiveMargin} px; пересчитывается для каждого файла`;
+  else snapHint = "Учтёт плашку, обводку и тень";
+  $("safeZoneSnapHint").textContent = snapHint;
 }
 
 // ---------------- fonts ----------------
@@ -598,7 +668,7 @@ function clearStageFrame() {
 
 // Outlines the area text can occupy, and labels it in source pixels: as wide
 // as max_width_ratio allows, as tall as line_count lines.
-function updateTextBox(stage, line, scale, videoWidth) {
+function updateTextBox(stage, line, scale, videoWidth, positionMargin) {
   const box = $("textBox");
   const stageW = stage.clientWidth;
   const stageH = stage.clientHeight;
@@ -610,11 +680,11 @@ function updateTextBox(stage, line, scale, videoWidth) {
 
   let top;
   if (style.position === "top") {
-    top = style.position_margin * scale;
+    top = positionMargin * scale;
   } else if (style.position === "center") {
     top = (stageH - boxH) / 2;
   } else {
-    top = stageH - style.position_margin * scale - boxH;
+    top = stageH - positionMargin * scale - boxH;
   }
   top = Math.max(0, Math.min(top, stageH - boxH));
 
