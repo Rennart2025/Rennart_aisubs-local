@@ -21,15 +21,18 @@
 @font-face { font-family: "UI Sans"; src: local("Segoe UI"); }
 
 :root{
-  --bg: #0c0e13;
-  --panel: #151822;
-  --panel-2: #1b1f2c;
-  --border: #262b3a;
-  --text: #eef0f6;
-  --text-dim: #9099b0;
-  --accent: #4fb2ff;
-  --accent-2: #9b5cff;
-  --accent-grad: linear-gradient(135deg, #4fb2ff, #9b5cff);
+  /* Neutral dark grey: same lightness as the old navy palette, no hue. */
+  --bg: #101010;
+  --panel: #1c1c1c;
+  --panel-2: #242424;
+  --border: #303030;
+  --border-hover: #484848;
+  --text: #f2f2f2;
+  --text-dim: #a0a0a0;
+  --accent: #a7a7a7;          /* focus, selection, sliders, progress */
+  --control-on: #555555;      /* active toggle, switch that is on */
+  --primary: #c9c9c9;         /* the main action button */
+  --primary-text: #111111;
   --good: #2be55b;
   --warn: #ffb020;
   --danger: #ff4d5e;
@@ -69,8 +72,7 @@ body{
 }
 .logo{
   font-weight:800; font-size:16px; letter-spacing:.3px;
-  background: var(--accent-grad);
-  -webkit-background-clip:text; background-clip:text; color:transparent;
+  color: var(--text);
 }
 .logo-sub{ color:var(--text-dim); font-size:12px; }
 .creator-link{
@@ -88,47 +90,18 @@ body{
   font-size:12px; color: var(--text-dim);
   -webkit-app-region: no-drag;
 }
-.mode-switch{ display:flex; gap:3px; padding:3px; border:1px solid var(--border); border-radius:10px; background:var(--panel-2); -webkit-app-region:no-drag; }
-.mode-switch button{ border:0; background:transparent; color:var(--text-dim); padding:7px 13px; border-radius:7px; cursor:pointer; font-weight:700; }
-.mode-switch button.active{ background:var(--accent-grad); color:#08111f; }
 .dot{ width:8px; height:8px; border-radius:50%; background:var(--good); box-shadow:0 0 8px var(--good); }
 
 /* ---------- main layout ---------- */
+/* files | preview + presets | text editor | style */
 .main{
   display:grid;
-  grid-template-columns: 360px 1fr 380px;
+  grid-template-columns: minmax(220px, 270px) minmax(260px, 1fr) minmax(330px, 560px) minmax(300px, 360px);
   gap:1px;
   background: var(--border);
   overflow:hidden;
+  min-height:0;
 }
-.manual-workspace{ display:grid; grid-template-columns:340px 1fr; gap:1px; background:var(--border); overflow:hidden; }
-.manual-sidebar,.manual-editor{ background:var(--bg); padding:18px; overflow:auto; }
-.manual-summary{ color:var(--text-dim); font-size:12px; margin-bottom:12px; }
-.manual-filters{ display:flex; gap:6px; margin-bottom:12px; flex-wrap:wrap; }
-.manual-filters button,.manual-toolbar button,.word-actions button{ border:1px solid var(--border); background:var(--panel-2); color:var(--text-dim); padding:7px 10px; border-radius:8px; cursor:pointer; }
-.manual-filters button.active{ border-color:var(--accent); color:var(--text); }
-.manual-item{ width:100%; display:grid; grid-template-columns:22px 1fr auto; gap:8px; align-items:center; text-align:left; border:1px solid transparent; background:var(--panel); color:var(--text); padding:10px; border-radius:10px; margin-bottom:6px; cursor:pointer; }
-.manual-item.selected{ border-color:var(--accent); }
-.manual-item small{ display:block; color:var(--text-dim); margin-top:3px; }
-.manual-item .error{ color:var(--danger); }
-.manual-empty{ display:grid; place-items:center; min-height:100%; color:var(--text-dim); text-align:center; }
-.manual-editor-head{ display:flex; align-items:center; gap:12px; margin-bottom:12px; }
-.manual-editor-head h2{ margin:0; font-size:18px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.save-state{ margin-left:auto; color:var(--text-dim); font-size:12px; }
-.manual-content{ display:grid; grid-template-columns:minmax(260px,38%) 1fr; gap:18px; min-height:0; }
-.manual-video{ width:100%; max-height:420px; background:#000; border-radius:12px; }
-.attention-box{ margin-top:10px; padding:10px; border-radius:10px; background:rgba(255,190,67,.08); color:#ffc864; font-size:12px; }
-.word-editor{ display:flex; flex-direction:column; min-height:0; }
-.word-list{ overflow:auto; padding-right:6px; }
-.word-row{ display:grid; grid-template-columns:minmax(150px,1fr) 82px 82px auto; gap:7px; align-items:center; padding:7px; border-bottom:1px solid var(--border); }
-.word-row.low-confidence{ background:rgba(255,190,67,.06); }
-.word-row.deleted{ opacity:.45; }
-.word-row input{ width:100%; background:var(--panel-2); border:1px solid var(--border); color:var(--text); border-radius:8px; padding:8px; }
-.word-row input:focus{ border-color:var(--accent); outline:none; }
-.word-time{ font-variant-numeric:tabular-nums; }
-.manual-toolbar{ display:flex; gap:8px; align-items:center; margin-top:12px; flex-wrap:wrap; }
-.manual-toolbar .primary{ background:var(--accent-grad); color:#08111f; border:0; font-weight:800; }
-.manual-toolbar button:disabled{ opacity:.45; cursor:not-allowed; }
 .sr-status{ position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0); }
 .col{
   background: var(--bg);
@@ -151,20 +124,20 @@ h3{ font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--
   transition:.15s;
   color: var(--text-dim);
 }
-.dropzone:hover{ border-color: var(--accent); color:var(--text); background:rgba(79,178,255,0.05); }
+.dropzone:hover{ border-color: var(--accent); color:var(--text); background:rgba(167,167,167,0.05); }
 .dropzone svg{ opacity:.6; margin-bottom:8px; }
 
 /* drag & drop feedback - the drop is handled natively by the window, so the
    body class is toggled from Python rather than by HTML5 drag events */
 body.dragging .dropzone{
   border-color: var(--accent); border-style:solid;
-  background:rgba(79,178,255,0.12); color:var(--text);
+  background:rgba(167,167,167,0.12); color:var(--text);
   transform: scale(1.01);
 }
 body.dragging .dropzone svg{ opacity:1; }
 .drop-overlay{
   position:fixed; inset:0; z-index:60;
-  background:rgba(12,14,19,0.82);
+  background:rgba(16,16,16,0.82);
   border:3px dashed var(--accent);
   display:none; align-items:center; justify-content:center;
   flex-direction:column; gap:12px;
@@ -180,7 +153,7 @@ video{ width:100%; display:block; max-height:340px; background:#000; }
 .font-count{ color:var(--accent); font-weight:700; }
 .queue-count{ color:var(--accent); font-weight:700; }
 
-.file-list{ margin-top:10px; display:flex; flex-direction:column; gap:6px; max-height:210px; overflow-y:auto; }
+.file-list{ display:flex; flex-direction:column; gap:6px; max-height:46vh; overflow-y:auto; }
 .file-row{
   display:flex; align-items:center; gap:9px;
   padding:8px 10px; background:var(--panel); border-radius:10px;
@@ -188,10 +161,15 @@ video{ width:100%; display:block; max-height:340px; background:#000; }
 }
 .file-row:hover{ border-color:var(--border); }
 .file-row.selected{ border-color:var(--accent); }
-.file-row.active{ border-color:var(--accent); background:rgba(79,178,255,0.08); }
+.file-row.active{ border-color:var(--accent); background:rgba(167,167,167,0.08); }
 .file-row .name{
-  flex:1; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  flex:1; min-width:0; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
+.file-row .name small{ display:block; margin-top:2px; font-size:11px; color:var(--text-dim); overflow:hidden; text-overflow:ellipsis; }
+.file-row .name small.error{ color:var(--danger); }
+.file-row .status{ width:14px; text-align:center; }
+.file-row.running .status{ color:var(--accent); }
+.file-row.ready .status{ color:var(--warn); }
 .file-row .status{ font-size:15px; line-height:1; flex:0 0 auto; }
 .file-row.done .status{ color:var(--good); }
 .file-row.failed .status{ color:var(--danger); }
@@ -201,13 +179,67 @@ video{ width:100%; display:block; max-height:340px; background:#000; }
 }
 .file-row .remove:hover{ color:var(--danger); }
 .file-row .mini-bar{ flex:0 0 46px; height:4px; background:var(--panel-2); border-radius:2px; overflow:hidden; }
-.file-row .mini-fill{ height:100%; width:0%; background:var(--accent-grad); transition:width .25s; }
+.file-row .mini-fill{ height:100%; width:0%; background:var(--accent); transition:width .25s; }
 
 .add-more-btn{
   width:100%; margin-top:8px; background:var(--panel-2); border:1px dashed var(--border);
   color:var(--text-dim); padding:8px; border-radius:10px; cursor:pointer; font-size:12.5px;
 }
 .add-more-btn:hover{ border-color:var(--accent); color:var(--text); }
+.list-actions{ display:flex; gap:6px; margin-top:8px; }
+.list-actions .add-more-btn{ margin-top:0; }
+.list-actions .clear-btn{ flex:0 0 auto; width:auto; border-style:solid; }
+.list-actions .clear-btn:hover{ border-color:var(--danger); color:var(--danger); }
+
+/* ---------- text editor ---------- */
+.editor-col{ display:flex; flex-direction:column; min-height:0; overflow:hidden; }
+.editor-head{ display:flex; align-items:baseline; gap:10px; margin-bottom:10px; min-width:0; }
+.editor-head h3{ margin:0; flex:0 0 auto; }
+.editor-file{ flex:1; min-width:0; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.save-state{ flex:0 0 auto; color:var(--text-dim); font-size:12px; }
+.editor-empty{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; color:var(--text-dim); text-align:center; padding:20px; line-height:1.5; }
+.editor-empty .empty-action{ width:auto; }
+.editor-body{ flex:1; display:flex; flex-direction:column; min-height:0; }
+.attention-box{ margin-bottom:8px; padding:8px 10px; border-radius:10px; background:rgba(255,190,67,.08); color:#ffc864; font-size:12px; }
+.attention-box.bad{ background:rgba(255,77,94,.08); color:#ff8792; }
+.word-head, .word-row{ display:grid; grid-template-columns:minmax(0,1fr) 66px 66px 26px 26px; gap:6px; align-items:center; }
+.word-head{ padding:0 6px 6px; font-size:11px; color:var(--text-dim); border-bottom:1px solid var(--border); }
+.word-list{ flex:1; overflow:auto; min-height:0; padding-right:4px; }
+.word-list::-webkit-scrollbar{ width:8px; }
+.word-list::-webkit-scrollbar-thumb{ background:var(--border); border-radius:4px; }
+.word-row{ padding:4px 6px; border-radius:8px; }
+.word-row + .word-row{ margin-top:2px; }
+.word-row.low-confidence .word-text{ border-color:rgba(255,190,67,.55); background:rgba(255,190,67,.07); }
+.word-row.bad-timing .word-time{ border-color:var(--danger); color:#ff8792; }
+.word-row.deleted .word-text{ text-decoration:line-through; opacity:.45; }
+.word-row.deleted .word-time{ opacity:.45; }
+.word-row.playing{ background:rgba(167,167,167,.12); }
+.word-row input{ width:100%; min-width:0; background:var(--panel-2); border:1px solid var(--border); color:var(--text); border-radius:8px; padding:7px 8px; font:inherit; font-size:13px; }
+.word-row input:focus{ border-color:var(--accent); outline:none; }
+.word-row .word-time{ padding:7px 5px; font-size:12px; font-variant-numeric:tabular-nums; }
+.word-row .word-time::-webkit-inner-spin-button{ display:none; }
+.word-row button{ height:28px; border:1px solid var(--border); background:var(--panel-2); color:var(--text-dim); border-radius:7px; cursor:pointer; padding:0; font-size:14px; line-height:1; }
+.word-row button:hover{ color:var(--text); border-color:var(--border-hover); }
+.word-row .word-del:hover{ color:var(--danger); border-color:var(--danger); }
+.editor-toolbar{ display:flex; gap:8px; align-items:center; padding-top:10px; margin-top:8px; border-top:1px solid var(--border); flex-wrap:wrap; }
+.editor-toolbar button{ border:1px solid var(--border); background:var(--panel-2); color:var(--text-dim); padding:7px 11px; border-radius:8px; cursor:pointer; font-size:12.5px; }
+.editor-toolbar button:hover{ color:var(--text); border-color:var(--border-hover); }
+.editor-toolbar button:disabled{ opacity:.45; cursor:not-allowed; }
+.editor-toolbar .hint{ margin-left:auto; font-size:11px; color:var(--text-dim); }
+
+/* ---------- player under the preview ---------- */
+.stage-video{ position:absolute; inset:0; width:100%; height:100%; max-height:none; object-fit:fill; background:transparent; z-index:1; }
+.preview-stage.showing-output .preview-line,
+.preview-stage.showing-output .text-box,
+.preview-stage.showing-output .safe-zone-layer{ display:none; }
+.player-bar{ display:flex; align-items:center; gap:8px; margin-top:8px; flex-wrap:wrap; }
+.player-bar .play-btn{ flex:0 0 auto; width:32px; height:30px; border:1px solid var(--border); background:var(--panel-2); color:var(--text); border-radius:8px; cursor:pointer; font-size:12px; }
+.player-bar .play-btn:disabled{ opacity:.45; cursor:default; }
+.player-bar input[type=range]{ flex:1 1 80px; min-width:60px; }
+.player-bar .time{ flex:0 0 auto; font-size:11px; color:var(--text-dim); font-variant-numeric:tabular-nums; }
+.source-toggle{ flex:0 0 auto; margin-left:auto; }
+.source-toggle button{ padding:5px 8px; font-size:11px; }
+.source-toggle button:disabled{ opacity:.4; cursor:default; }
 
 /* ---------- form controls ---------- */
 label{ display:block; font-size:12px; color:var(--text-dim); margin: 14px 0 6px; }
@@ -226,7 +258,7 @@ select, .btn, input[type=text]{
   outline:none;
   transition:.15s;
 }
-select:hover, input[type=text]:hover{ border-color:#3a4155; }
+select:hover, input[type=text]:hover{ border-color:var(--border-hover); }
 select:focus, input[type=text]:focus{ border-color: var(--accent); }
 
 input[type=range]{
@@ -237,7 +269,7 @@ input[type=range]::-webkit-slider-runnable-track{
 }
 input[type=range]::-webkit-slider-thumb{
   -webkit-appearance:none; width:16px; height:16px; margin-top:-6px;
-  border-radius:50%; background: var(--accent); border:2px solid #0c0e13;
+  border-radius:50%; background: var(--accent); border:2px solid var(--bg);
   box-shadow:0 0 0 1px var(--accent);
 }
 .range-val{ float:right; color:var(--text); font-variant-numeric: tabular-nums; }
@@ -257,7 +289,7 @@ input[type=color]::-webkit-color-swatch{ border-radius:6px; border:none; }
   flex:1; background:none; border:none; color:var(--text-dim); padding:8px 6px; border-radius:8px;
   font-size:12.5px; cursor:pointer; transition:.15s; font-weight:600;
 }
-.toggle-group button.active{ background: var(--accent-grad); color:#08111f; }
+.toggle-group button.active{ background: var(--control-on); color:var(--text); }
 
 .switch-row{ display:flex; align-items:center; justify-content:space-between; margin:14px 0 6px; }
 .switch-row label{ margin:0; }
@@ -265,48 +297,52 @@ input[type=color]::-webkit-color-swatch{ border-radius:6px; border:none; }
 .switch input{ opacity:0; width:0; height:0; }
 .slider-toggle{ position:absolute; inset:0; background:var(--panel-2); border:1px solid var(--border); border-radius:22px; cursor:pointer; transition:.15s; }
 .slider-toggle:before{ content:""; position:absolute; width:16px; height:16px; left:2px; top:2px; background:var(--text-dim); border-radius:50%; transition:.15s; }
-.switch input:checked + .slider-toggle{ background: var(--accent-grad); border-color:transparent; }
-.switch input:checked + .slider-toggle:before{ transform:translateX(16px); background:#08111f; }
+.switch input:checked + .slider-toggle{ background: var(--control-on); border-color:var(--border-hover); }
+.switch input:checked + .slider-toggle:before{ transform:translateX(16px); background:var(--text); }
 
 /* ---------- presets ---------- */
-.preset-grid{ display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+.preset-grid{ display:grid; grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); gap:6px; }
 .preset-card{
-  background: var(--panel); border:1.5px solid var(--border); border-radius:12px;
-  padding:10px; cursor:pointer; transition:.15s; text-align:center;
+  position:relative;
+  background: var(--panel); border:1px solid var(--border); border-radius:9px;
+  padding:5px; cursor:pointer; transition:.15s; text-align:center;
 }
-.preset-card:hover{ border-color:#3a4155; transform:translateY(-1px); }
+.preset-card:hover{ border-color:var(--border-hover); }
 .preset-card.active{ border-color: var(--accent); box-shadow:0 0 0 1px var(--accent); }
 .preset-thumb{
-  border-radius:8px; background:#05070a; height:64px; display:flex; align-items:center; justify-content:center;
-  margin-bottom:8px; overflow:hidden;
+  border-radius:6px; background:#080808; height:30px; display:flex; align-items:center; justify-content:center;
+  margin-bottom:4px; overflow:hidden;
 }
-.preset-name{ font-size:11.5px; color:var(--text-dim); font-weight:600; }
+.preset-name{ font-size:10.5px; color:var(--text-dim); font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .preset-card.active .preset-name{ color:var(--text); }
-.preset-card{ position:relative; }
 .preset-del{
-  position:absolute; top:6px; right:6px;
-  background:rgba(0,0,0,0.45); border:1px solid var(--border); color:var(--text-dim);
-  border-radius:8px; cursor:pointer; font-size:12px; line-height:1;
-  padding:3px 6px; opacity:0; transition:.15s;
+  position:absolute; top:3px; right:3px;
+  background:rgba(0,0,0,0.6); border:1px solid var(--border); color:var(--text-dim);
+  border-radius:6px; cursor:pointer; font-size:11px; line-height:1;
+  padding:2px 5px; opacity:0; transition:.15s;
 }
 .preset-card:hover .preset-del{ opacity:1; }
 .preset-del:hover{ border-color:var(--danger); color:var(--danger); }
 .preset-card.confirm-delete .preset-del{
   opacity:1; background:var(--danger); border-color:var(--danger); color:#fff; font-weight:700;
 }
+.preset-save{ display:flex; gap:6px; margin-top:8px; }
+.preset-save input[type=text]{ padding:7px 9px; font-size:12px; }
+.preset-save .btn{ flex:0 0 auto; width:auto; padding:7px 12px; font-size:12px; }
 
 /* ---------- live preview ---------- */
 /* Holder has a definite height; JS fits the stage inside it to the video's
    aspect ratio. Letting CSS derive size from aspect-ratio inside a flex column
    collapses the box to a few pixels wide. */
+/* The frame gets all the height the column has; player, safe zones and
+   presets sit at the bottom (.preview-bottom). */
 .preview-holder{
-  height: min(620px, 66vh);
-  min-height: 320px;
-  flex: none;               /* otherwise the presets below shrink it to min-height */
+  flex: 1 1 auto;
+  min-height: 260px;
   display:flex; align-items:center; justify-content:center;
 }
 .preview-stage{
-  background:#07080b center/contain no-repeat;
+  background:#090909 center/contain no-repeat;
   border-radius: var(--radius);
   border:1px solid var(--border);
   display:flex; align-items:flex-end; justify-content:center;
@@ -315,7 +351,7 @@ input[type=color]::-webkit-color-swatch{ border-radius:6px; border:none; }
 }
 /* shown until a video is loaded, so the empty state is not a blank box */
 .preview-stage.no-frame{
-  background-image: repeating-conic-gradient(#14161c 0% 25%, #0e1015 0% 50%);
+  background-image: repeating-conic-gradient(#181818 0% 25%, #121212 0% 50%);
   background-size: 20px 20px;
 }
 /* No padding here: the width available to text must match what the renderer
@@ -333,7 +369,7 @@ input[type=color]::-webkit-color-swatch{ border-radius:6px; border:none; }
 .text-box{
   position:absolute;
   z-index:5;
-  border:1px dashed rgba(79,178,255,.55);
+  border:1px dashed rgba(167,167,167,.55);
   border-radius:3px;
   pointer-events:none;
 }
@@ -341,7 +377,7 @@ input[type=color]::-webkit-color-swatch{ border-radius:6px; border:none; }
   position:absolute; top:-9px; right:0;
   transform:translateY(-100%);
   font-size:10px; color:var(--accent);
-  background:rgba(7,8,11,.75); padding:1px 5px; border-radius:4px;
+  background:rgba(9,9,9,.75); padding:1px 5px; border-radius:4px;
   white-space:nowrap;
 }
 .preview-empty{
@@ -368,10 +404,12 @@ input[type=color]::-webkit-color-swatch{ border-radius:6px; border:none; }
 .safe-zone-frame[data-platform="reels"] .safe-zone-label{ left:50%; transform:translateX(-50%); }
 .safe-zone-frame[data-platform="shorts"] .safe-zone-label{ left:auto; right:4px; }
 .safe-zone-controls{ margin-top:10px; text-align:center; }
+.preview-col{ display:flex; flex-direction:column; overflow-x:hidden; overflow-y:auto; }
+.preview-bottom{ flex:none; }
 .safe-zone-controls-head{ display:flex; align-items:baseline; justify-content:center; gap:8px; margin-bottom:7px; }
 .safe-zone-controls-title{ color:var(--text); font-size:11.5px; font-weight:700; }
 .safe-zone-controls-note{ color:var(--text-dim); font-size:10.5px; }
-.safe-zone-options{ display:flex; justify-content:center; gap:6px; flex-wrap:wrap; }
+.safe-zone-options{ display:flex; justify-content:center; align-items:center; gap:6px; flex-wrap:wrap; }
 .safe-zone-toggle{
   display:inline-flex; align-items:center; gap:6px; min-height:30px; padding:5px 9px;
   border:1px solid var(--border); border-radius:8px; background:var(--panel-2);
@@ -400,7 +438,7 @@ input[type=color]::-webkit-color-swatch{ border-radius:6px; border:none; }
 .safe-zone-snap:hover{ border-color:var(--accent); }
 .safe-zone-snap:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
 .safe-zone-snap:active{ background:var(--panel); color:var(--text); }
-.safe-zone-snap[aria-pressed="true"]{ border-color:var(--accent); background:rgba(77,208,187,.12); color:var(--text); }
+.safe-zone-snap[aria-pressed="true"]{ border-color:var(--accent); background:rgba(167,167,167,.12); color:var(--text); }
 .safe-zone-snap:disabled{ opacity:.45; cursor:not-allowed; }
 .safe-zone-snap-hint{ min-height:1.4em; }
 
@@ -412,16 +450,19 @@ input[type=color]::-webkit-color-swatch{ border-radius:6px; border:none; }
   background: var(--panel);
 }
 .run-btn{
-  background: var(--accent-grad); color:#08111f; border:none; font-weight:800; font-size:14px;
+  background: var(--primary); color:var(--primary-text); border:1px solid var(--primary); font-weight:800; font-size:14px;
   padding: 13px 28px; border-radius:12px; cursor:pointer; transition:.15s; white-space:nowrap;
-  box-shadow: 0 4px 20px rgba(79,178,255,0.25);
 }
-.run-btn:hover{ filter:brightness(1.08); transform:translateY(-1px); }
-.run-btn:disabled{ opacity:.5; cursor:default; transform:none; filter:none; }
+.run-btn:hover{ filter:brightness(1.08); }
+.run-btn:disabled{ opacity:.45; cursor:default; transform:none; filter:none; box-shadow:none; }
+.run-btn.secondary{ background:var(--panel-2); color:var(--text); border:1px solid var(--border-hover); }
+.run-btn .step{ display:inline-block; margin-right:8px; width:20px; height:20px; line-height:20px; border-radius:50%; background:rgba(0,0,0,.14); font-size:11px; text-align:center; }
+.run-btn.secondary .step{ background:var(--border); color:var(--text-dim); }
+.run-summary{ font-size:11px; color:var(--text-dim); margin-top:5px; }
 .progress-wrap{ flex:1; }
 .progress-label{ display:flex; justify-content:space-between; font-size:12px; color:var(--text-dim); margin-bottom:6px; }
 .progress-track{ height:8px; background:var(--panel-2); border-radius:4px; overflow:hidden; }
-.progress-fill{ height:100%; width:0%; background: var(--accent-grad); transition: width .25s ease; }
+.progress-fill{ height:100%; width:0%; background: var(--accent); transition: width .25s ease; }
 .result-actions{ display:flex; gap:8px; }
 .result-actions button{
   background:var(--panel-2); border:1px solid var(--border); color:var(--text); padding:9px 14px;
@@ -433,7 +474,9 @@ input[type=color]::-webkit-color-swatch{ border-radius:6px; border:none; }
   position:fixed; bottom:100px; left:50%; transform:translateX(-50%);
   background:var(--panel-2); border:1px solid var(--danger); color:var(--text);
   padding:10px 16px; border-radius:10px; font-size:13px; z-index:50;
+  max-width:min(640px, 80vw);
 }
+.toast.ok{ border-color:var(--accent); }
 </style>
 </head>
 <body>
@@ -457,16 +500,12 @@ input[type=color]::-webkit-color-swatch{ border-radius:6px; border:none; }
       onclick="openCreatorChannel()"
     >@daipotestit ↗</button>
     <div class="spacer"></div>
-    <div class="mode-switch" aria-label="Режим работы">
-      <button id="modeAuto" class="active" type="button">Авто</button>
-      <button id="modeManual" type="button">Мануал</button>
-    </div>
     <div class="gpu-badge"><span class="dot" id="gpuDot"></span><span id="gpuLabel">определение GPU...</span></div>
   </div>
 
-  <div class="main" id="autoWorkspace">
+  <div class="main" id="workspace">
 
-    <!-- LEFT: video + transcription -->
+    <!-- FILES: the list + recognition settings -->
     <div class="col">
       <div class="section">
         <h3>Видео <span id="queueCount" class="queue-count"></span></h3>
@@ -475,10 +514,12 @@ input[type=color]::-webkit-color-swatch{ border-radius:6px; border:none; }
           <div>Перетащите видео сюда</div>
           <div class="dropzone-hint">или нажмите, чтобы выбрать — можно сразу несколько</div>
         </div>
-        <div id="videoWrapHidden" class="hidden">
-          <div class="video-wrap"><video id="preview" controls></video></div>
-          <div class="file-list" id="fileList"></div>
-          <button class="add-more-btn" onclick="pickVideos()">+ Добавить ещё видео</button>
+        <div id="fileListWrap" class="hidden">
+          <div class="file-list" id="fileList" role="listbox" aria-label="Видео"></div>
+          <div class="list-actions">
+            <button class="add-more-btn" type="button" onclick="pickVideos()">+ Добавить видео</button>
+            <button class="add-more-btn clear-btn" type="button" id="clearListBtn" title="Убрать все файлы из списка (сами видео не удаляются)">Очистить</button>
+          </div>
         </div>
       </div>
 
@@ -514,26 +555,31 @@ input[type=color]::-webkit-color-swatch{ border-radius:6px; border:none; }
       </div>
     </div>
 
-    <!-- CENTER: live preview -->
-    <div class="col" style="display:flex; flex-direction:column;">
-      <h3>Предпросмотр стиля</h3>
+    <!-- PREVIEW: the selected video with captions + presets -->
+    <div class="col preview-col">
+      <h3>Предпросмотр</h3>
       <div class="preview-holder" id="previewHolder">
         <div class="preview-stage no-frame" id="previewStage">
-          <div class="preview-empty">Добавьте видео — предпросмотр покажет кадр из него<br>с субтитрами в выбранном стиле</div>
+          <video id="stageVideo" class="stage-video" playsinline preload="metadata"></video>
+          <div class="preview-empty">Добавьте видео — здесь будет кадр<br>с субтитрами в выбранном стиле</div>
           <div class="safe-zone-layer" id="safeZoneLayer" aria-hidden="true"></div>
           <div class="text-box" id="textBox"><span class="text-box-size" id="textBoxSize"></span></div>
           <div class="preview-line" id="previewLine"></div>
         </div>
       </div>
-      <div style="text-align:center; color:var(--text-dim); font-size:11.5px; margin-top:10px;">
-        <span id="previewHint">Кадр из видео в масштабе 1:1 — так субтитры лягут на самом деле</span>
+      <div class="preview-bottom">
+      <div class="player-bar">
+        <button class="play-btn" id="playBtn" type="button" aria-label="Воспроизвести" disabled>▶</button>
+        <input type="range" id="seekBar" min="0" max="1000" value="0" aria-label="Позиция в видео" disabled>
+        <span class="time" id="timeLabel">0:00 / 0:00</span>
+        <div class="toggle-group source-toggle" id="sourceToggle">
+          <button type="button" data-val="source" class="active">Исходник</button>
+          <button type="button" data-val="output" disabled title="Появится после рендера">Результат</button>
+        </div>
       </div>
       <div class="safe-zone-controls">
-        <div class="safe-zone-controls-head">
-          <span class="safe-zone-controls-title">Безопасные зоны</span>
-          <span class="safe-zone-controls-note">только предпросмотр</span>
-        </div>
         <div class="safe-zone-options" role="group" aria-label="Безопасные зоны социальных сетей" aria-describedby="safeZoneFormatHint">
+          <span class="safe-zone-controls-title" title="Разметка только для предпросмотра, в видео не попадает">Безопасные зоны</span>
           <button class="safe-zone-toggle" type="button" data-platform="tiktok" aria-pressed="false"><span class="safe-zone-dot"></span>TikTok</button>
           <button class="safe-zone-toggle" type="button" data-platform="reels" aria-pressed="false"><span class="safe-zone-dot"></span>Reels</button>
           <button class="safe-zone-toggle" type="button" data-platform="shorts" aria-pressed="false"><span class="safe-zone-dot"></span>Shorts</button>
@@ -541,13 +587,36 @@ input[type=color]::-webkit-color-swatch{ border-radius:6px; border:none; }
         <span class="safe-zone-format-hint hidden" id="safeZoneFormatHint" role="status" aria-live="polite">Разметка рассчитана на вертикальное видео 9:16</span>
       </div>
 
-      <div class="section" style="margin-top:22px;">
+      <div class="section" style="margin-top:12px; margin-bottom:0;">
         <h3>Пресеты</h3>
         <div class="preset-grid" id="presetGrid"></div>
-        <label style="margin-top:14px;">Название для сохранения</label>
-        <div class="row">
-          <input type="text" id="presetSaveName" placeholder="мой стиль">
-          <button class="btn" style="flex:0 0 auto; width:auto; padding:9px 14px;" onclick="savePreset()">Сохранить</button>
+        <div class="preset-save">
+          <input type="text" id="presetSaveName" placeholder="название своего стиля" aria-label="Название для сохранения">
+          <button class="btn" type="button" onclick="savePreset()">Сохранить</button>
+        </div>
+      </div>
+      </div>
+    </div>
+
+    <!-- TEXT: words and timings of the selected video -->
+    <div class="col editor-col">
+      <div class="editor-head">
+        <h3>Текст</h3>
+        <span class="editor-file" id="editorFileName"></span>
+        <span class="save-state" id="editorSaveState" aria-live="polite"></span>
+      </div>
+      <div class="editor-empty" id="editorEmpty">
+        <div id="editorEmptyText">Добавьте видео слева.<br>Потом нажмите <b>Transcribe</b> — здесь появится распознанный текст.</div>
+        <button class="btn empty-action hidden" type="button" id="editorEmptyAction"></button>
+      </div>
+      <div class="editor-body hidden" id="editorBody">
+        <div id="editorAttention" class="attention-box hidden"></div>
+        <div class="word-head" aria-hidden="true"><span>Слово</span><span>Начало, с</span><span>Конец, с</span><span></span><span></span></div>
+        <div class="word-list" id="wordList"></div>
+        <div class="editor-toolbar">
+          <button type="button" id="retranscribeBtn" title="Новая версия текста с текущими настройками распознавания">Распознать заново</button>
+          <button type="button" id="openResultBtn" class="hidden">Открыть результат</button>
+          <span class="hint">Enter — следующее слово · правки сохраняются сами</span>
         </div>
       </div>
     </div>
@@ -575,6 +644,13 @@ input[type=color]::-webkit-color-swatch{ border-radius:6px; border:none; }
           <button data-val="lower">строчные</button>
           <button data-val="none">Как есть</button>
         </div>
+        <label>Разбивка текста</label>
+        <div class="toggle-group" id="captionModeGroup">
+          <button data-val="phrases" class="active">Фразы</button>
+          <button data-val="sentences">Предложения</button>
+          <button data-val="words">По слову</button>
+        </div>
+        <div class="field-hint" id="captionModeHint"></div>
 
         <label>Цвет текста</label>
         <div class="color-row">
@@ -595,6 +671,7 @@ input[type=color]::-webkit-color-swatch{ border-radius:6px; border:none; }
           <label>Тень</label>
           <label class="switch"><input type="checkbox" id="s_shadow_enabled" checked><span class="slider-toggle"></span></label>
         </div>
+        <div id="shadowParams">
         <div class="row">
           <div>
             <label>Размытие <span class="range-val" id="v_shadow_blur">6</span></label>
@@ -603,6 +680,44 @@ input[type=color]::-webkit-color-swatch{ border-radius:6px; border:none; }
           <div>
             <label>Прозрачность <span class="range-val" id="v_shadow_opacity">45</span></label>
             <input type="range" id="s_shadow_opacity" min="0" max="100" value="45">
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label>Offset X <span class="range-val" id="v_shadow_offset_x">0</span></label>
+            <input type="range" id="s_shadow_offset_x" min="-40" max="40" value="0">
+          </div>
+          <div>
+            <label>Offset Y <span class="range-val" id="v_shadow_offset_y">3</span></label>
+            <input type="range" id="s_shadow_offset_y" min="-40" max="40" value="3">
+          </div>
+        </div>
+        </div>
+
+        <div class="switch-row">
+          <label>Тень 2</label>
+          <label class="switch"><input type="checkbox" id="s_shadow2_enabled"><span class="slider-toggle"></span></label>
+        </div>
+        <div id="shadow2Params">
+          <div class="row">
+            <div>
+              <label>Размытие <span class="range-val" id="v_shadow2_blur">18</span></label>
+              <input type="range" id="s_shadow2_blur" min="0" max="40" value="18">
+            </div>
+            <div>
+              <label>Прозрачность <span class="range-val" id="v_shadow2_opacity">35</span></label>
+              <input type="range" id="s_shadow2_opacity" min="0" max="100" value="35">
+            </div>
+          </div>
+          <div class="row">
+            <div>
+              <label>Offset X <span class="range-val" id="v_shadow2_offset_x">0</span></label>
+              <input type="range" id="s_shadow2_offset_x" min="-40" max="40" value="0">
+            </div>
+            <div>
+              <label>Offset Y <span class="range-val" id="v_shadow2_offset_y">10</span></label>
+              <input type="range" id="s_shadow2_offset_y" min="-40" max="40" value="10">
+            </div>
           </div>
         </div>
       </div>
@@ -673,65 +788,27 @@ input[type=color]::-webkit-color-swatch{ border-radius:6px; border:none; }
 
   </div>
 
-  <div class="manual-workspace hidden" id="manualWorkspace">
-    <aside class="manual-sidebar" aria-label="Очередь проверки">
-      <h3>Пакетная проверка</h3>
-      <div class="manual-summary" id="manualSummary">Транскрипция ещё не запущена</div>
-      <div class="manual-filters" id="manualFilters">
-        <button type="button" class="active" data-filter="all">Все</button>
-        <button type="button" data-filter="attention">Требуют внимания</button>
-        <button type="button" data-filter="reviewed">Одобрены</button>
-        <button type="button" data-filter="errors">Ошибки</button>
-      </div>
-      <div id="manualQueueList"></div>
-    </aside>
-    <section class="manual-editor" id="manualEditor">
-      <div class="manual-empty" id="manualEmpty">Выберите готовый транскрипт слева.<br>Проверять можно, пока остальные файлы распознаются.</div>
-      <div id="manualEditorContent" class="hidden">
-        <div class="manual-editor-head">
-          <h2 id="manualFileName"></h2>
-          <span class="save-state" id="manualSaveState" aria-live="polite">Сохранено</span>
-        </div>
-        <div class="manual-content">
-          <div>
-            <video id="manualVideo" class="manual-video" controls></video>
-            <div id="manualAttention" class="attention-box hidden"></div>
-          </div>
-          <div class="word-editor">
-            <div class="word-list" id="manualWordList"></div>
-            <div class="manual-toolbar">
-              <button type="button" id="approveCurrent" class="primary">Одобрить файл</button>
-              <button type="button" id="nextAttention">Следующий проблемный</button>
-              <button type="button" id="approveClean">Одобрить все без предупреждений</button>
-              <button type="button" id="retryManualFailed">Повторить ошибки</button>
-              <button type="button" id="retranscribeCurrent">Распознать заново</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-    <div class="sr-status" id="manualLive" aria-live="polite"></div>
-  </div>
-
   <div class="footer">
-    <button class="run-btn" id="runBtn" onclick="runCurrentMode()">Создать субтитры</button>
-    <button class="btn hidden" id="cancelBtn" style="width:auto" onclick="cancelCurrentQueue()">Остановить после файла</button>
+    <button class="run-btn" id="transcribeBtn" type="button" onclick="runTranscribe()"><span class="step">1</span><span class="label">Transcribe</span></button>
+    <button class="run-btn secondary" id="renderBtn" type="button" onclick="runRender()"><span class="step">2</span><span class="label">Render</span></button>
+    <button class="btn hidden" id="cancelBtn" style="width:auto" type="button" onclick="cancelCurrentQueue()">Остановить после файла</button>
     <div class="progress-wrap">
-      <div class="progress-label"><span id="progressStage">Готово к запуску</span><span id="progressPct"></span></div>
+      <div class="progress-label"><span id="progressStage">Добавьте видео</span><span id="progressPct"></span></div>
       <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+      <div class="run-summary" id="runSummary"></div>
     </div>
     <div class="result-actions hidden" id="resultActions">
-      <button onclick="openOutput()">Открыть папку</button>
-      <button onclick="playResult()">Смотреть результат</button>
+      <button type="button" onclick="openOutput()">Открыть папку</button>
     </div>
   </div>
+  <div class="sr-status" id="liveStatus" aria-live="polite"></div>
 
 </div>
 
 <script src="manual-state.js"></script>
-<script src="manual-review.js"></script>
 <script src="creator-channel.js"></script>
 <script src="safe-zones.js"></script>
 <script src="app.js"></script>
+<script src="workspace.js"></script>
 </body>
 </html>

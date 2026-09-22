@@ -139,5 +139,135 @@ class ManualJobServiceTests(unittest.TestCase):
         self.assertEqual(job["job_id"], restarted.latest_snapshot()["job_id"])
 
 
+
+class WorkspaceTests(unittest.TestCase):
+    """The GUI's single list: files come and go, each on its own track."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.rendered = []
+
+        def transcribe(path, **_params):
+            return {"transcript": transcript_for(Path(path).stem), "cached": False}
+
+        def render(path, output, segments, **_params):
+            self.rendered.append(Path(path).name)
+            return {"output": str(output)}
+
+        self.service = ManualJobService(self.root / "revisions", transcribe, render)
+        self.output = self.root / "output"
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def video(self, name):
+        path = self.root / name
+        path.write_bytes(b"video")
+        return path
+
+    def states(self):
+        return [item["state"] for item in self.service.workspace()["items"]]
+
+    def test_video_added_after_a_render_waits_for_transcription(self):
+        job = self.service.workspace()
+        snapshot, (first_id,) = self.service.add_items(job["job_id"], [self.video("one.mp4")])
+        self.service.run_transcription(job["job_id"])
+        self.service.run_render(job["job_id"], {}, self.output)
+        self.assertEqual(["completed"], self.states())
+
+        _, added = self.service.add_items(job["job_id"], [self.video("two.mp4")])
+
+        self.assertEqual(["completed", "pending"], self.states())
+        self.assertEqual(1, len(added))
+        self.service.run_transcription(job["job_id"])
+        self.assertEqual(["completed", "transcribed"], self.states())
+        self.service.run_render(job["job_id"], {}, self.output)
+        self.assertEqual(["one.mp4", "two.mp4"], self.rendered)
+
+    def test_same_file_is_not_added_twice(self):
+        job = self.service.workspace()
+        path = self.video("one.mp4")
+        self.service.add_items(job["job_id"], [path])
+        _, added = self.service.add_items(job["job_id"], [path])
+        self.assertEqual([], added)
+        self.assertEqual(1, len(self.service.workspace()["items"]))
+
+    def test_render_does_not_need_an_approval_step(self):
+        job = self.service.workspace()
+        self.service.add_items(job["job_id"], [self.video("one.mp4")])
+        self.service.run_transcription(job["job_id"])
+
+        result = self.service.run_render(job["job_id"], {}, self.output)
+
+        self.assertEqual(1, result["completed"])
+
+    def test_editing_a_rendered_file_makes_it_ready_again(self):
+        job = self.service.workspace()
+        _, (item_id,) = self.service.add_items(job["job_id"], [self.video("one.mp4")])
+        self.service.run_transcription(job["job_id"])
+        self.service.run_render(job["job_id"], {}, self.output)
+
+        transcript = self.service.get_transcript(item_id)
+        word_id = transcript["words"][0]["id"]
+        self.service.apply_patch(item_id, transcript["revision"],
+                                 [{"op": "replace", "word_id": word_id, "text": " правка"}])
+
+        self.assertEqual(1, self.service.workspace()["ready_count"])
+
+    def test_rendered_file_can_be_rendered_again_when_selected(self):
+        job = self.service.workspace()
+        _, (item_id,) = self.service.add_items(job["job_id"], [self.video("one.mp4")])
+        self.service.run_transcription(job["job_id"])
+        self.service.run_render(job["job_id"], {}, self.output)
+        (self.output / "one_captioned.mp4").write_bytes(b"x")
+
+        result = self.service.run_render(job["job_id"], {}, self.output, selected_ids=[item_id])
+
+        self.assertEqual(1, result["completed"])
+        self.assertTrue(self.service.workspace()["items"][0]["output"].endswith("one_captioned_2.mp4"))
+
+    def test_removed_file_leaves_the_list_and_its_transcript(self):
+        job = self.service.workspace()
+        _, (first, second) = self.service.add_items(
+            job["job_id"], [self.video("one.mp4"), self.video("two.mp4")])
+        self.service.run_transcription(job["job_id"])
+
+        snapshot = self.service.remove_items(job["job_id"], [first])
+
+        self.assertEqual(["two.mp4"], [item["name"] for item in snapshot["items"]])
+        self.assertEqual(0, snapshot["items"][0]["index"])
+        self.assertFalse((self.root / "revisions" / f"{first}.revisions.json").exists())
+
+    def test_deleted_source_fails_that_file_with_a_clear_message(self):
+        job = self.service.workspace()
+        path = self.video("gone.mp4")
+        self.service.add_items(job["job_id"], [path, self.video("kept.mp4")])
+        path.unlink()
+
+        self.service.run_transcription(job["job_id"])
+
+        items = self.service.workspace()["items"]
+        self.assertEqual(["failed", "transcribed"], [item["state"] for item in items])
+        self.assertIn("не найден", items[0]["error"])
+
+    def test_cancelled_render_keeps_the_transcript_ready(self):
+        job = self.service.workspace()
+        self.service.add_items(job["job_id"], [self.video("one.mp4")])
+        self.service.run_transcription(job["job_id"])
+
+        self.service.run_render(job["job_id"], {}, self.output, cancelled=lambda: True)
+
+        self.assertEqual(["transcribed"], self.states())
+
+    def test_workspace_survives_a_restart(self):
+        job = self.service.workspace()
+        self.service.add_items(job["job_id"], [self.video("one.mp4")])
+        restarted = ManualJobService(self.root / "revisions",
+                                     self.service.transcribe_fn, self.service.render_fn)
+        self.assertEqual(job["job_id"], restarted.workspace()["job_id"])
+        self.assertEqual(["pending"], [item["state"] for item in restarted.workspace()["items"]])
+
+
 if __name__ == "__main__":
     unittest.main()

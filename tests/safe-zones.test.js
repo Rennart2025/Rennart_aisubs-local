@@ -311,3 +311,12 @@ test("enables snapping only for an active guide on a vertical video", () => {
   assert.equal(canSnapMargin(active, "bottom", 1920, 1080), false);
   assert.equal(canSnapMargin(createState(), "bottom", 1080, 1920), false);
 });
+
+test("a second shadow widens the safe margin when it reaches further", () => {
+  const visualOverflow = requireApi("visualOverflow");
+  const base = { highlight_style: "none", stroke_width: 0, shadow_enabled: true, shadow_blur: 4, shadow_offset: [0, 2] };
+
+  assert.equal(visualOverflow(base, "bottom"), 12);
+  assert.equal(visualOverflow({ ...base, shadow2_enabled: true, shadow2_blur: 10, shadow2_offset: [0, 8] }, "bottom"), 33);
+  assert.equal(visualOverflow({ ...base, shadow2_enabled: false, shadow2_blur: 10 }, "bottom"), 12);
+});

@@ -24,8 +24,7 @@ import transcribe as transcribe_mod
 import mediaserver
 import fontlist
 from lib.manual_jobs import ManualJobService
-from lib.output_planner import plan_output_paths
-from lib.transcript_revisions import RevisionConflict, TranscriptError, ValidationError
+from lib.transcript_revisions import RevisionConflict, TranscriptError
 
 PRESETS_DIR = os.path.join(BASE_DIR, "presets")
 OUTPUT_DIR = os.path.join(BASE_DIR, "output")
@@ -50,6 +49,7 @@ class Api:
         self._js_queue = queue.Queue()
         self._js_thread = threading.Thread(target=self._js_pump, daemon=True)
         self._js_thread.start()
+        self._worker_lock = threading.Lock()
         self._manual = ManualJobService(
             REVISIONS_DIR,
             pipeline_mod.transcribe_phase,
@@ -133,10 +133,13 @@ class Api:
 
     def _push_files(self, paths):
         videos = [p for p in paths if os.path.splitext(p)[1].lower() in VIDEO_EXTS]
+        if paths and not videos:
+            self._js("showToast", "Это не видео: поддерживаются " + ", ".join(sorted(VIDEO_EXTS)))
+            return
         self._js("onVideosPicked", videos)
 
     def _manual_event(self, snapshot, _item):
-        self._js("onManualJobUpdated", snapshot)
+        self._js("onWorkspaceUpdated", snapshot)
 
     def delete_preset(self, filename):
         """Removes a preset by its file stem. Refuses anything that would
@@ -157,6 +160,11 @@ class Api:
         except Exception as e:
             traceback.print_exc()
             return {"ok": False, "error": str(e)}
+
+    def typography(self):
+        """Word rules the preview needs to group captions like the renderer."""
+        from lib.typography import HANGING_WORDS
+        return {"hanging_words": sorted(HANGING_WORDS)}
 
     def models_status(self):
         """Which models are already on disk, so the UI can say what needs a download."""
@@ -273,80 +281,111 @@ class Api:
         self._cancelled = True
         return True
 
-    def run_pipeline(self, args):
-        videos = args.get("videos") or []
-        style = args.get("style")
-        model = args.get("model") or "large-v3"
-        device = args.get("device") or "auto"
-        language = args.get("language") or None
+    # ---------- workspace: one list of files, Transcribe -> edit -> Render ----------
 
-        self._cancelled = False
-        output_paths = plan_output_paths(videos, OUTPUT_DIR)
+    def _start_worker(self, target):
+        """Runs one transcription or render pass at a time.
 
-        js = self._js
+        Two passes over the same list would race on the same items, so a
+        second request while one is running is refused instead of queued.
+        """
+        if not self._worker_lock.acquire(blocking=False):
+            return False
 
-        def worker():
-            outputs = []
-            for index, video in enumerate(videos):
-                if self._cancelled:
-                    break
-
-                output_path = output_paths[index]
-
-                js("onFileStarted", index)
+        def run():
+            try:
+                target()
+            except Exception as exc:
+                traceback.print_exc()
+                self._js("onPipelineError", str(exc))
+            finally:
+                self._worker_lock.release()
                 try:
-                    result = pipeline_mod.run_pipeline(
-                        video,
-                        output_path,
-                        style=style,
-                        model_size=model,
-                        device=device,
-                        language=language,
-                        progress_cb=lambda stage, pct: js("updateProgress", stage, int(pct), index),
-                    )
-                    outputs.append(result["output"])
-                    js("onFileDone", index, result["output"])
-                except Exception as e:
+                    self._js("onWorkspaceUpdated", self._manual.workspace())
+                except Exception:
                     traceback.print_exc()
-                    js("onFileError", index, str(e))
 
-            js("onQueueDone", outputs)
+        threading.Thread(target=run, daemon=True).start()
+        return True
 
-        threading.Thread(target=worker, daemon=True).start()
-        return {"started": True, "count": len(videos)}
+    def workspace(self):
+        try:
+            return {"ok": True, "job": self._manual.workspace()}
+        except Exception as exc:
+            traceback.print_exc()
+            return {"ok": False, "error": str(exc)}
 
-    def start_manual_job(self, args):
-        videos = args.get("videos") or []
-        if not videos:
-            return {"ok": False, "error": "Добавьте хотя бы одно видео"}
-        self._cancelled = False
+    def add_videos(self, paths):
+        try:
+            job = self._manual.workspace()
+            videos = [p for p in (paths or []) if os.path.splitext(p)[1].lower() in VIDEO_EXTS]
+            snapshot, added = self._manual.add_items(job["job_id"], videos)
+            return {"ok": True, "job": snapshot, "added": added}
+        except Exception as exc:
+            traceback.print_exc()
+            return {"ok": False, "error": str(exc)}
+
+    def remove_videos(self, item_ids):
+        try:
+            job = self._manual.workspace()
+            return {"ok": True, "job": self._manual.remove_items(job["job_id"], item_ids or [])}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def transcribe(self, args):
+        """Transcribes the given files (default: every file that has no text yet)."""
+        args = args or {}
         params = {
             "model_size": args.get("model") or "large-v3",
             "device": args.get("device") or "auto",
             "language": args.get("language") or None,
         }
-        snapshot = self._manual.create_job(videos, params)
+        job_id = self._manual.workspace()["job_id"]
+        item_ids = args.get("item_ids") or None
+        self._cancelled = False
+        started = self._start_worker(lambda: self._manual.run_transcription(
+            job_id, selected_ids=item_ids, params=params,
+            cancelled=lambda: self._cancelled,
+        ))
+        if not started:
+            return {"ok": False, "error": "Дождитесь окончания текущей обработки"}
+        return {"ok": True}
 
-        def worker():
-            result = self._manual.run_transcription(
-                snapshot["job_id"], cancelled=lambda: self._cancelled
+    def render(self, args):
+        """Renders the given files with the current style (default: all ready files)."""
+        args = args or {}
+        style = args.get("style") or {}
+        item_ids = args.get("item_ids") or None
+        job_id = self._manual.workspace()["job_id"]
+        self._cancelled = False
+
+        def work():
+            result = self._manual.run_render(
+                job_id, style, OUTPUT_DIR, selected_ids=item_ids,
+                cancelled=lambda: self._cancelled,
             )
-            self._js("onManualJobUpdated", result)
+            self._js("onRenderDone", result)
 
-        threading.Thread(target=worker, daemon=True).start()
-        return {"ok": True, "job": snapshot}
+        if not self._start_worker(work):
+            return {"ok": False, "error": "Дождитесь окончания текущей обработки"}
+        return {"ok": True}
 
-    def get_manual_job(self, job_id):
-        try:
-            return {"ok": True, "job": self._manual.snapshot(job_id)}
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
-
-    def latest_manual_job(self):
-        try:
-            return {"ok": True, "job": self._manual.latest_snapshot()}
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+    def retranscribe(self, item_id, args=None):
+        """New transcript for one file with the current model settings, bypassing the cache."""
+        args = args or {}
+        params = {
+            "model_size": args.get("model") or "large-v3",
+            "device": args.get("device") or "auto",
+            "language": args.get("language") or None,
+            "use_cached_transcript": False,
+        }
+        self._cancelled = False
+        started = self._start_worker(lambda: self._manual.retranscribe(
+            item_id, params=params, cancelled=lambda: self._cancelled
+        ))
+        if not started:
+            return {"ok": False, "error": "Дождитесь окончания текущей обработки"}
+        return {"ok": True}
 
     def get_transcript(self, item_id):
         try:
@@ -366,190 +405,36 @@ class Api:
             traceback.print_exc()
             return {"ok": False, "code": "internal", "error": str(exc)}
 
-    def approve_transcript(self, item_id, revision):
-        try:
-            approved = self._manual.approve(item_id, revision)
-            return {"ok": True, "transcript": approved}
-        except ValidationError as exc:
-            return {"ok": False, "code": "validation", "errors": exc.errors, "error": str(exc)}
-        except RevisionConflict as exc:
-            return {"ok": False, "code": "revision_conflict", "error": str(exc)}
-        except Exception as exc:
-            return {"ok": False, "code": "internal", "error": str(exc)}
-
-    def approve_clean_transcripts(self, job_id):
-        try:
-            snapshot = self._manual.snapshot(job_id)
-            approved = []
-            rejected = []
-            for item in snapshot["items"]:
-                if item["state"] not in {"transcribed", "needs_review"}:
-                    continue
-                transcript = self._manual.get_transcript(item["item_id"])
-                errors = self._manual.store.validation_errors(transcript)
-                low_confidence = any(
-                    word.get("probability") is not None and word["probability"] < 0.65
-                    for word in transcript["words"] if not word.get("deleted")
-                )
-                if errors or low_confidence:
-                    rejected.append(item["item_id"])
-                    continue
-                self._manual.approve(item["item_id"], transcript["revision"])
-                approved.append(item["item_id"])
-            return {"ok": True, "approved": approved, "needs_attention": rejected}
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
-
-    def retry_manual_transcription(self, job_id, item_ids=None):
-        try:
-            snapshot = self._manual.snapshot(job_id)
-            selected = item_ids or [
-                item["item_id"] for item in snapshot["items"]
-                if item["state"] in {"failed", "no_speech", "cancelled"}
-            ]
-            if not selected:
-                return {"ok": False, "error": "Нет файлов для повтора"}
-            self._cancelled = False
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
-
-        def worker():
-            result = self._manual.run_transcription(
-                job_id, selected_ids=selected, cancelled=lambda: self._cancelled
-            )
-            self._js("onManualJobUpdated", result)
-
-        threading.Thread(target=worker, daemon=True).start()
-        return {"ok": True, "count": len(selected)}
-
-    def retranscribe_manual_item(self, item_id, args=None):
-        args = args or {}
-        params = {
-            "model_size": args.get("model") or "large-v3",
-            "device": args.get("device") or "auto",
-            "language": args.get("language") or None,
-            "use_cached_transcript": False,
-        }
-        self._cancelled = False
-
-        def worker():
-            try:
-                snapshot = self._manual.retranscribe(
-                    item_id, params=params, cancelled=lambda: self._cancelled
-                )
-                self._js("onManualJobUpdated", snapshot)
-            except Exception as exc:
-                traceback.print_exc()
-                self._js("onPipelineError", f"Повторная транскрибация: {exc}")
-
-        threading.Thread(target=worker, daemon=True).start()
-        return {"ok": True, "started": True}
-
-    def start_manual_render(self, args):
-        job_id = args.get("job_id")
-        style = args.get("style") or {}
-        selected_ids = args.get("item_ids") or None
-        self._cancelled = False
-        try:
-            snapshot = self._manual.snapshot(job_id)
-            if not snapshot["render_ready"]:
-                return {"ok": False, "error": "Дождитесь транскрибации и одобрите хотя бы один файл"}
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
-
-        def worker():
-            result = self._manual.run_render(
-                job_id, style, OUTPUT_DIR, selected_ids=selected_ids,
-                cancelled=lambda: self._cancelled,
-            )
-            self._js("onManualRenderDone", job_id, result)
-            self._js("onManualJobUpdated", self._manual.snapshot(job_id))
-
-        threading.Thread(target=worker, daemon=True).start()
-        return {"ok": True, "started": True}
-
 
 def enable_file_drop(api, window):
     """Native drag & drop of video files.
 
-    The HTML5 File API never exposes a real path, so dropping onto the page is
-    useless for us. Instead WebView2's own drop handling is switched off and the
-    hosting WinForms window takes the drop, which does carry full paths.
-
-    All of this must run on the UI thread - WebView2 controller properties throw
-    if touched from anywhere else.
+    The page fills the whole window and WebView2 runs in its own process, so
+    WinForms drag events on the form never fire. pywebview's DOM events do
+    reach Python, and on WebView2 each dropped file carries its real path in
+    `pywebviewFullPath` (the HTML5 File API alone never exposes it).
+    The drag highlight itself is handled in the page (gui/workspace.js).
     """
-    form = getattr(window, "native", None)
-    if form is None:
-        return
+    from webview.dom import DOMEventHandler
 
-    from System import Action
+    def ignore(_event):
+        pass
 
-    def setup():
-        _setup_file_drop(api, form)
+    def on_drop(event):
+        try:
+            files = (event.get("dataTransfer") or {}).get("files") or []
+            paths = [f.get("pywebviewFullPath") for f in files if f.get("pywebviewFullPath")]
+            if paths:
+                api._push_files(paths)
+        except Exception:
+            traceback.print_exc()
 
     try:
-        form.BeginInvoke(Action(setup))
-    except Exception:
-        traceback.print_exc()
-
-
-def _setup_file_drop(api, form):
-    try:
-        from System.Windows.Forms import DragDropEffects, DataFormats
-
-        webview_control = getattr(form, "webview", None)
-        if webview_control is not None:
-            try:
-                webview_control.AllowExternalDrop = False
-            except Exception:
-                pass  # older WebView2 control: page-level drop simply stays inert
-
-        def dropped_videos(args):
-            if not args.Data.GetDataPresent(DataFormats.FileDrop):
-                return []
-            paths = list(args.Data.GetData(DataFormats.FileDrop))
-            return [p for p in paths if os.path.splitext(p)[1].lower() in VIDEO_EXTS]
-
-        # DragDropEffects.None is unreachable by attribute access ("None" is a
-        # Python keyword), so it has to be fetched by name.
-        effect_none = getattr(DragDropEffects, "None")
-
-        def on_drag_enter(sender, args):
-            if dropped_videos(args):
-                args.Effect = DragDropEffects.Copy
-                api._js("onDragEnter")
-            else:
-                args.Effect = effect_none
-
-        def on_drag_leave(sender, args):
-            api._js("onDragLeave")
-
-        def on_drag_drop(sender, args):
-            api._js("onDragLeave")
-            videos = dropped_videos(args)
-            if videos:
-                api._js("onVideosPicked", videos)
-
-        # Subscribe on the form AND on the WebView2 control. The control covers
-        # the whole client area, so a drop lands on it first; relying on OLE to
-        # walk up to the form is fragile because WebView2's inner windows live
-        # in another process.
-        targets = [form]
-        if webview_control is not None:
-            targets.append(webview_control)
-
-        for target in targets:
-            try:
-                target.AllowDrop = True
-                target.DragEnter += on_drag_enter
-                target.DragLeave += on_drag_leave
-                target.DragDrop += on_drag_drop
-            except Exception:
-                traceback.print_exc()
-
-        # keep the delegates alive; .NET only holds weak refs through pythonnet
-        api._drop_handlers = (on_drag_enter, on_drag_leave, on_drag_drop)
+        events = window.dom.document.events
+        # preventDefault on dragover/drop keeps WebView2 from opening the file.
+        events.dragenter += DOMEventHandler(ignore, True, True)
+        events.dragover += DOMEventHandler(ignore, True, True, debounce=500)
+        events.drop += DOMEventHandler(on_drop, True, True)
     except Exception:
         traceback.print_exc()
 
@@ -561,16 +446,16 @@ def main():
         "AISubs",
         os.path.join(BASE_DIR, "gui", "index.html"),
         js_api=api,
-        width=1360,
-        height=860,
-        min_size=(1100, 700),
+        width=1560,
+        height=900,
+        min_size=(1280, 720),
         background_color="#0c0e13",
     )
     # Must stay underscore-private: pywebview walks public attributes of js_api
     # to build the JS bridge, and a Window leads into the WinForms/.NET graph,
     # where a property read blocks on the UI thread and freezes the app.
     api._window = window
-    window.events.shown += lambda: enable_file_drop(api, window)
+    window.events.loaded += lambda: enable_file_drop(api, window)
     webview.start()
 
 

@@ -1,6 +1,7 @@
 # Adapted from captacity (MIT License) - https://github.com/unconv/captacity
 # Groups word-level transcript segments into on-screen caption chunks.
 
+import unicodedata
 from typing import Callable
 
 from typography import is_hanging
@@ -13,10 +14,94 @@ def has_partial_sentence(text):
             return True
     return False
 
+SENTENCE_END = (".", "!", "?", "…")
+
+
+def split_sentences(segments):
+    """Marks the last word of every sentence and drops its full stops.
+
+    "кухни." becomes "кухни" with sentence_end=True, so the next sentence
+    starts a new caption even though the period that used to signal it is
+    gone. "!" and "?" stay visible but also end the sentence. Periods inside
+    a word ("3.5", "т.е") are kept; only the trailing ones go.
+    """
+    for segment in segments:
+        for word in segment["words"]:
+            text = word["word"]
+            core = text.rstrip()
+            if core.endswith(SENTENCE_END):
+                word["sentence_end"] = True
+                stripped = core.rstrip(".…")
+                # A word that was nothing but dots stays as it was rather than
+                # turning into an empty caption word.
+                if stripped.strip():
+                    word["word"] = stripped + text[len(core):]
+    return segments
+
+
+def _is_punct(ch):
+    return unicodedata.category(ch).startswith("P")
+
+
+def clean_word(text):
+    """Strips punctuation and quotes: "«Особые" -> "Особые", "кухни»." -> "кухни".
+
+    Kept: a hyphen or apostrophe between letters ("какой-то", "don't") and a
+    point or comma between digits ("3.5"). The leading space that separates
+    words in whisper output is preserved.
+    """
+    lead = text[: len(text) - len(text.lstrip())]
+    core = text.strip()
+    out = []
+    for i, ch in enumerate(core):
+        if not _is_punct(ch):
+            out.append(ch)
+            continue
+        before = core[i - 1] if i > 0 else ""
+        after = core[i + 1] if i + 1 < len(core) else ""
+        if ch in "-'’" and before.isalnum() and after.isalnum():
+            out.append(ch)
+        elif ch in ".," and before.isdigit() and after.isdigit():
+            out.append(ch)
+    return lead + "".join(out)
+
+
+def caption_mode(style):
+    """"phrases" | "sentences" | "words", accepting the older sentence_breaks flag."""
+    mode = (style or {}).get("caption_mode")
+    if mode in ("phrases", "sentences", "words"):
+        return mode
+    return "sentences" if (style or {}).get("sentence_breaks") else "phrases"
+
+
+def one_word_captions(segments, hold_gap=0.7):
+    """Every word is its own caption, stripped of punctuation.
+
+    Each word stays up until the next one starts when the pause between them
+    is short, so the screen does not blink empty between words.
+    """
+    words = []
+    for segment in segments:
+        for word in segment["words"]:
+            text = clean_word(word["word"])
+            if text.strip():
+                words.append(dict(word, word=text))
+    captions = []
+    for i, word in enumerate(words):
+        if i + 1 < len(words):
+            next_start = words[i + 1]["start"]
+            if 0 <= next_start - word["end"] <= hold_gap:
+                word["end"] = next_start
+        captions.append(_new_caption([word]))
+    return captions
+
+
 def parse(
     segments: list,
     fit_function: Callable,
     allow_partial_sentences: bool = False,
+    sentence_breaks: bool = False,
+    one_word: bool = False,
 ):
     captions = []
     caption = {
@@ -33,6 +118,12 @@ def parse(
                 segments[s]["words"][w-1]["word"] += word["word"]
                 segments[s]["words"][w-1]["end"] = word["end"]
                 del segments[s]["words"][w]
+
+    if one_word:
+        return one_word_captions(segments)
+
+    if sentence_breaks:
+        split_sentences(segments)
 
     for segment in segments:
         for word in segment["words"]:
@@ -56,7 +147,13 @@ def parse(
                 captions.append(caption)
                 caption = _new_caption(carried + [word])
 
-    captions.append(caption)
+            # A finished sentence closes the caption: the next one starts fresh.
+            if word.get("sentence_end") and caption["words"]:
+                captions.append(caption)
+                caption = {"start": None, "end": 0, "words": [], "text": ""}
+
+    if caption["words"]:
+        captions.append(caption)
 
     return captions
 

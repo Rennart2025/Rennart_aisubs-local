@@ -85,13 +85,17 @@
     const value = style || {};
     const boxBleed = value.highlight_style === "box" ? Math.max(0, Number(value.box_padding_y) || 0) : 0;
     const strokeBleed = Math.max(0, Number(value.stroke_width) || 0);
-    let shadowBleed = 0;
-    if (value.shadow_enabled) {
-      const offsetY = Array.isArray(value.shadow_offset) ? Number(value.shadow_offset[1]) || 0 : 0;
+    // Both shadow layers can reach past the text; the larger one decides.
+    const layerBleed = (enabled, blur, offset) => {
+      if (!enabled) return 0;
+      const offsetY = Array.isArray(offset) ? Number(offset[1]) || 0 : 0;
       const directionalOffset = position === "top" ? Math.max(0, -offsetY) : Math.max(0, offsetY);
-      const blurFootprint = Math.ceil(2.5 * Math.max(0, Number(value.shadow_blur) || 0));
-      shadowBleed = blurFootprint + directionalOffset;
-    }
+      return Math.ceil(2.5 * Math.max(0, Number(blur) || 0)) + directionalOffset;
+    };
+    const shadowBleed = Math.max(
+      layerBleed(value.shadow_enabled, value.shadow_blur, value.shadow_offset),
+      layerBleed(value.shadow2_enabled, value.shadow2_blur, value.shadow2_offset),
+    );
     return Math.max(boxBleed, strokeBleed) + shadowBleed;
   }
 

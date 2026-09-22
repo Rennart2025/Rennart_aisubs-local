@@ -50,6 +50,7 @@ function ensureFontFace(value) {
       // Nudge a redraw once the file is in.
       if (document.fonts && document.fonts.load) {
         await document.fonts.load(`16px "${alias}"`);
+        window.fontEpoch = (window.fontEpoch || 0) + 1;   // caption widths change
         updatePreview();
         renderPresetGrid();
       }
@@ -79,6 +80,8 @@ const DEFAULT_STYLE = {
   font: "fonts/Montserrat-var.ttf#ExtraBold",
   font_size: 84,
   text_case: "upper",   // "upper" | "lower" | "none"
+  // caption_mode: "phrases" | "sentences" | "words" - left unset here so a
+  // preset that only has the older sentence_breaks flag keeps its meaning.
   text_color: "#FFFFFF",
   stroke_color: "#000000",
   stroke_width: 0,
@@ -87,6 +90,11 @@ const DEFAULT_STYLE = {
   shadow_opacity: 0.45,
   shadow_blur: 6,
   shadow_offset: [0, 3],
+  shadow2_enabled: false,
+  shadow2_color: "#000000",
+  shadow2_opacity: 0.35,
+  shadow2_blur: 18,
+  shadow2_offset: [0, 10],
   highlight_style: "box",
   word_highlight_color: "#3FA9E8",
   active_text_color: "#FFFFFF",
@@ -105,13 +113,10 @@ const DEFAULT_STYLE = {
 };
 
 let style = Object.assign({}, DEFAULT_STYLE);
-let queue = [];           // [{path, name, status: 'pending'|'running'|'done'|'failed', progress, output}]
-let previewIndex = null;  // which queued file is shown in the video element
-let previewVideo = null;  // {width, height, duration} of that file, for 1:1 preview scaling
+let previewVideo = null;  // {width, height, duration} of the selected file, for 1:1 preview scaling
 let lastOutputPath = null;
 let presets = [];
 let isRunning = false;
-let appMode = "auto";
 let safeZoneState = SafeZones.createState();
 
 const $ = (id) => document.getElementById(id);
@@ -131,6 +136,23 @@ function bindRange(id, valId, key, fmt) {
     updatePreview();
     renderSafeZones();
   });
+}
+
+// One axis of an [x, y] offset pair.
+function bindOffset(id, valId, key, axis) {
+  const el = $(id);
+  el.addEventListener("input", () => {
+    const pair = offsetPair(style[key]);
+    pair[axis] = parseFloat(el.value);
+    style[key] = pair;
+    $(valId).textContent = pair[axis];
+    updatePreview();
+    renderSafeZones();
+  });
+}
+
+function offsetPair(value) {
+  return Array.isArray(value) ? [Number(value[0]) || 0, Number(value[1]) || 0] : [0, 0];
 }
 
 function bindColor(colorId, hexId, key, alsoKey) {
@@ -159,6 +181,12 @@ function setupBindings() {
   $("fontCyrillicOnly").addEventListener("change", renderFontOptions);
   bindRange("s_font_size", "v_font_size", "font_size");
   setupToggleGroup("textCaseGroup", (val) => { style.text_case = val; updatePreview(); });
+  setupToggleGroup("captionModeGroup", (val) => {
+    style.caption_mode = val;
+    style.sentence_breaks = val === "sentences";   // what older builds read
+    updateCaptionModeHint();
+    updatePreview();
+  });
   bindColor("s_text_color", "s_text_color_hex", "text_color");
 
   bindRange("s_stroke_width", "v_stroke_width", "stroke_width");
@@ -166,11 +194,25 @@ function setupBindings() {
 
   $("s_shadow_enabled").addEventListener("change", () => {
     style.shadow_enabled = $("s_shadow_enabled").checked;
+    $("shadowParams").classList.toggle("hidden", !style.shadow_enabled);
     updatePreview();
     renderSafeZones();
   });
   bindRange("s_shadow_blur", "v_shadow_blur", "shadow_blur");
   bindRange("s_shadow_opacity", "v_shadow_opacity", "shadow_opacity", (v) => v / 100);
+  bindOffset("s_shadow_offset_x", "v_shadow_offset_x", "shadow_offset", 0);
+  bindOffset("s_shadow_offset_y", "v_shadow_offset_y", "shadow_offset", 1);
+
+  $("s_shadow2_enabled").addEventListener("change", () => {
+    style.shadow2_enabled = $("s_shadow2_enabled").checked;
+    $("shadow2Params").classList.toggle("hidden", !style.shadow2_enabled);
+    updatePreview();
+    renderSafeZones();
+  });
+  bindRange("s_shadow2_blur", "v_shadow2_blur", "shadow2_blur");
+  bindRange("s_shadow2_opacity", "v_shadow2_opacity", "shadow2_opacity", (v) => v / 100);
+  bindOffset("s_shadow2_offset_x", "v_shadow2_offset_x", "shadow2_offset", 0);
+  bindOffset("s_shadow2_offset_y", "v_shadow2_offset_y", "shadow2_offset", 1);
 
   bindColor("s_box_color", "s_box_color_hex", "box_color");
   bindColor("s_active_text_color", "s_active_text_color_hex", "active_text_color");
@@ -228,7 +270,6 @@ function setupBindings() {
     });
   });
 
-  $("dropzone").addEventListener("click", pickVideos);
 }
 
 function setupToggleGroup(groupId, onChange) {
@@ -247,15 +288,30 @@ function applyStyleToControls() {
   if (fontCatalog.length) renderFontOptions(); else $("s_font").value = style.font;
   $("s_font_size").value = style.font_size; $("v_font_size").textContent = style.font_size;
   setActiveToggle("textCaseGroup", textCaseOf(style));
+  setActiveToggle("captionModeGroup", ManualState.captionModeOf(style));
+  updateCaptionModeHint();
   $("s_text_color").value = style.text_color; $("s_text_color_hex").value = style.text_color.toUpperCase();
 
   $("s_stroke_width").value = style.stroke_width; $("v_stroke_width").textContent = style.stroke_width;
   $("s_stroke_color").value = style.stroke_color; $("s_stroke_color_hex").value = style.stroke_color.toUpperCase();
 
   $("s_shadow_enabled").checked = style.shadow_enabled;
+  $("shadowParams").classList.toggle("hidden", !style.shadow_enabled);
   $("s_shadow_blur").value = style.shadow_blur; $("v_shadow_blur").textContent = style.shadow_blur;
   const shadowPct = Math.round(style.shadow_opacity * 100);
   $("s_shadow_opacity").value = shadowPct; $("v_shadow_opacity").textContent = shadowPct;
+  const [sx, sy] = offsetPair(style.shadow_offset);
+  $("s_shadow_offset_x").value = sx; $("v_shadow_offset_x").textContent = sx;
+  $("s_shadow_offset_y").value = sy; $("v_shadow_offset_y").textContent = sy;
+
+  $("s_shadow2_enabled").checked = Boolean(style.shadow2_enabled);
+  $("shadow2Params").classList.toggle("hidden", !style.shadow2_enabled);
+  $("s_shadow2_blur").value = style.shadow2_blur; $("v_shadow2_blur").textContent = style.shadow2_blur;
+  const shadow2Pct = Math.round(style.shadow2_opacity * 100);
+  $("s_shadow2_opacity").value = shadow2Pct; $("v_shadow2_opacity").textContent = shadow2Pct;
+  const [s2x, s2y] = offsetPair(style.shadow2_offset);
+  $("s_shadow2_offset_x").value = s2x; $("v_shadow2_offset_x").textContent = s2x;
+  $("s_shadow2_offset_y").value = s2y; $("v_shadow2_offset_y").textContent = s2y;
 
   $("s_box_color").value = style.box_color; $("s_box_color_hex").value = style.box_color.toUpperCase();
   $("s_active_text_color").value = style.active_text_color; $("s_active_text_color_hex").value = style.active_text_color.toUpperCase();
@@ -279,6 +335,16 @@ function applyStyleToControls() {
   renderSafeZones();
 }
 
+const CAPTION_MODE_HINTS = {
+  phrases: "Слова собираются во фразы по ширине блока, знаки препинания как в тексте.",
+  sentences: "Без точек; каждое новое предложение начинается с новой строки.",
+  words: "По одному слову, без знаков препинания и кавычек. Слово держится до следующего.",
+};
+
+function updateCaptionModeHint() {
+  $("captionModeHint").textContent = CAPTION_MODE_HINTS[ManualState.captionModeOf(style)];
+}
+
 function setActiveToggle(groupId, val) {
   const group = $(groupId);
   group.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.val === val));
@@ -294,8 +360,12 @@ function updatePreview() {
   const videoWidth = (previewVideo && previewVideo.width) || 1080;
   const scale = stage.clientWidth / videoWidth;
 
-  const words = PREVIEW_SAMPLE;
-  const activeIdx = 1;
+  // Real words of the selected transcript around the playhead when there is
+  // one, the sample line otherwise.
+  const sample = typeof previewSample === "function" ? previewSample() : null;
+  const words = sample ? sample.words : PREVIEW_SAMPLE;
+  const activeIdx = sample ? sample.active : 1;
+  line.style.visibility = sample && sample.hidden ? "hidden" : "visible";
   const [family, weight, italic] = fontCss(style.font);
 
   line.style.fontFamily = family;
@@ -305,9 +375,7 @@ function updatePreview() {
   line.style.color = style.text_color;
   const textCase = textCaseOf(style);
   line.style.textTransform = textCase === "upper" ? "uppercase" : textCase === "lower" ? "lowercase" : "none";
-  line.style.textShadow = style.shadow_enabled
-    ? `${style.shadow_offset[0]*scale}px ${style.shadow_offset[1]*scale}px ${style.shadow_blur*scale}px rgba(0,0,0,${style.shadow_opacity})`
-    : "none";
+  line.style.textShadow = previewShadows(scale);
   line.style.setProperty("-webkit-text-stroke", style.stroke_width > 0 ? `${style.stroke_width*scale}px ${style.stroke_color}` : "0px transparent");
 
   // Manual margins are source pixels; safe margins are resolved for this frame.
@@ -344,7 +412,24 @@ function updatePreview() {
     line.appendChild(span);
   });
 
-  trimToLineCount(line);
+  trimToLineCount(line, activeIdx);
+}
+
+// CSS paints the first shadow on top, the renderer draws "Тень 2" first and
+// the main shadow over it - so the main one is listed first here.
+function previewShadows(scale) {
+  const layer = (enabled, color, opacity, blur, offset) => {
+    if (!enabled) return null;
+    const [dx, dy] = offsetPair(offset);
+    const hex = /^#[0-9a-f]{6}$/i.test(color || "") ? color : "#000000";
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+    return `${dx * scale}px ${dy * scale}px ${(Number(blur) || 0) * scale}px rgba(${r},${g},${b},${opacity})`;
+  };
+  const layers = [
+    layer(style.shadow_enabled, style.shadow_color, style.shadow_opacity, style.shadow_blur, style.shadow_offset),
+    layer(style.shadow2_enabled, style.shadow2_color, style.shadow2_opacity, style.shadow2_blur, style.shadow2_offset),
+  ].filter(Boolean);
+  return layers.length ? layers.join(", ") : "none";
 }
 
 function renderSafeZones() {
@@ -481,6 +566,7 @@ function renderPresetGrid() {
   presets.forEach((p) => {
     const card = document.createElement("div");
     card.className = "preset-card";
+    card.title = p.name || p.filename;
     const [family, weight] = fontCss(p.font);
     const thumbColor = p.highlight_style === "box" ? p.box_color : p.word_highlight_color;
     card.innerHTML = `
@@ -552,76 +638,6 @@ async function savePreset() {
   const toSave = Object.assign({}, style, { name });
   await api().save_preset(name, toSave);
   await loadPresets();
-}
-
-// ---------------- video queue ----------------
-
-// The dialog runs on the UI thread and answers via window.onVideosPicked,
-// so this call returns immediately instead of blocking the window.
-function pickVideos() {
-  api().pick_videos();
-}
-
-// Called from Python: file dialog result, or a native drag & drop.
-window.onVideosPicked = function (paths) {
-  if (!paths || !paths.length) return;
-  addVideos(paths);
-};
-
-function addVideos(paths) {
-  const existing = new Set(queue.map((f) => f.path));
-  let added = 0;
-  paths.forEach((p) => {
-    if (existing.has(p)) return;
-    queue.push({ path: p, name: p.split(/[\\/]/).pop(), status: "pending", progress: 0, output: null });
-    added++;
-  });
-  if (!added) return;
-
-  $("dropzone").classList.add("hidden");
-  $("videoWrapHidden").classList.remove("hidden");
-  $("resultActions").classList.add("hidden");
-  lastOutputPath = null;
-
-  if (previewIndex === null && queue.length) showInPreview(0);
-  renderQueue();
-}
-
-// ---------------- drag & drop ----------------
-
-window.onDragEnter = function () {
-  document.body.classList.add("dragging");
-};
-
-window.onDragLeave = function () {
-  document.body.classList.remove("dragging");
-};
-
-async function showInPreview(index) {
-  const item = queue[index];
-  if (!item) return;
-  previewIndex = index;
-  const src = item.output || item.path;
-  renderQueue();
-
-  // file:// is unreachable from this page (it is served over http), so both
-  // the player and the still frame come from the app's own media server.
-  let info = {};
-  try {
-    info = (await api().video_info(src)) || {};
-  } catch (e) {
-    info = {};
-  }
-  if (previewIndex !== index) return;  // user switched while we were waiting
-
-  if (info.media_url) $("preview").src = info.media_url;
-  previewVideo = info.width ? info : null;
-  applyStageGeometry();
-
-  try {
-    const url = await api().frame_url(src, null);
-    if (previewIndex === index && url) setStageFrame(url);
-  } catch (e) { /* preview keeps the checkerboard */ }
 }
 
 function applyStageGeometry() {
@@ -699,89 +715,22 @@ const PREVIEW_SAMPLE = ["ЭТО", "ПРИМЕР", "СУБТИТРОВ", "НА", 
 // Drops trailing sample words until the block fits within line_count lines,
 // mirroring how the renderer packs words into a caption instead of wrapping
 // endlessly. Without this the preview shows more text than will ever appear.
-function trimToLineCount(line) {
+function trimToLineCount(line, activeIdx) {
   const lineHeight = parseFloat(getComputedStyle(line).lineHeight) || 1;
   const allowed = Math.max(1, style.line_count);
-  let guard = PREVIEW_SAMPLE.length;
+  let active = activeIdx == null ? 0 : activeIdx;
+  let guard = 12;
   while (guard-- > 0 && line.children.length > 1) {
     const lines = Math.round(line.scrollHeight / lineHeight);
     if (lines <= allowed) break;
-    line.removeChild(line.lastElementChild);
-  }
-}
-
-function removeFromQueue(index, event) {
-  event.stopPropagation();
-  if (isRunning) return;
-  queue.splice(index, 1);
-  if (!queue.length) {
-    previewIndex = null;
-    $("preview").removeAttribute("src");
-    clearStageFrame();
-    $("dropzone").classList.remove("hidden");
-    $("videoWrapHidden").classList.add("hidden");
-  } else if (previewIndex !== null) {
-    showInPreview(Math.min(previewIndex, queue.length - 1));
-    return;
-  }
-  renderQueue();
-}
-
-const STATUS_ICON = { pending: "○", running: "◐", done: "✓", failed: "✕" };
-
-function renderQueue() {
-  const list = $("fileList");
-  list.innerHTML = "";
-  queue.forEach((item, i) => {
-    const row = document.createElement("div");
-    row.className = "file-row " + item.status + (i === previewIndex ? " selected" : "");
-    row.onclick = () => showInPreview(i);
-    row.innerHTML = `
-      <span class="status">${STATUS_ICON[item.status]}</span>
-      <span class="name" title="${item.path}">${item.name}</span>
-      ${item.status === "running" ? `<span class="mini-bar"><span class="mini-fill" style="width:${item.progress}%"></span></span>` : ""}
-      ${isRunning ? "" : `<button class="remove" title="Убрать">×</button>`}
-    `;
-    const removeBtn = row.querySelector(".remove");
-    if (removeBtn) removeBtn.onclick = (e) => removeFromQueue(i, e);
-    list.appendChild(row);
-  });
-
-  $("queueCount").textContent = queue.length ? `— ${queue.length}` : "";
-  const btn = $("runBtn");
-  if (appMode === "auto") {
-    btn.textContent = queue.length > 1 ? `Создать субтитры (${queue.length})` : "Создать субтитры";
-  } else if (typeof updateManualRunButton === "function") {
-    updateManualRunButton();
-  }
-}
-
-// ---------------- run pipeline ----------------
-
-async function runPipeline() {
-  if (!queue.length) { pickVideos(); return; }
-
-  isRunning = true;
-  $("runBtn").disabled = true;
-  $("cancelBtn").disabled = false;
-  $("cancelBtn").textContent = "Остановить после файла";
-  $("cancelBtn").classList.remove("hidden");
-  $("resultActions").classList.add("hidden");
-  queue.forEach((f) => { f.status = "pending"; f.progress = 0; f.output = null; });
-  renderQueue();
-  setProgress("Подготовка...", 0);
-
-  try {
-    await api().run_pipeline({
-      videos: queue.map((f) => f.path),
-      style: style,
-      model: $("modelSize").value,
-      language: $("language").value,
-      device: $("device").value,
-    });
-  } catch (e) {
-    onQueueDone([]);
-    onPipelineError(String(e));
+    // Drop words from the side away from the highlighted one, so the word
+    // being edited never disappears from its own preview.
+    if (line.children.length - 1 > active) {
+      line.removeChild(line.lastElementChild);
+    } else {
+      line.removeChild(line.firstElementChild);
+      active--;
+    }
   }
 }
 
@@ -802,61 +751,11 @@ function setProgress(label, pct) {
   $("progressFill").style.width = (pct || 0) + "%";
 }
 
-// ---- called from Python via window.evaluate_js ----
-
-window.updateProgress = function (stage, pct, index) {
-  const label = STAGE_LABELS[stage] || stage;
-  if (index == null || !queue.length) {
-    setProgress(label, pct);
-    return;
-  }
-  queue[index].progress = ManualState.pipelineProgress(queue[index].progress, stage, pct);
-  const prefix = queue.length > 1 ? `[${index + 1}/${queue.length}] ` : "";
-  // overall = files fully done + fraction of the current one
-  const overall = Math.round(((index + queue[index].progress / 100) / queue.length) * 100);
-  setProgress(prefix + label, overall);
-  renderQueue();
-};
-
-window.onFileStarted = function (index) {
-  queue[index].status = "running";
-  renderQueue();
-};
-
-window.onFileDone = function (index, outputPath) {
-  queue[index].status = "done";
-  queue[index].output = outputPath;
-  queue[index].progress = 100;
-  lastOutputPath = outputPath;
-  renderQueue();
-};
-
-window.onFileError = function (index, message) {
-  queue[index].status = "failed";
-  renderQueue();
-  showToast(`Ошибка: ${queue[index].name}: ${message}`);
-};
-
-window.onQueueDone = function (outputs) {
-  isRunning = false;
-  $("cancelBtn").classList.add("hidden");
-  $("cancelBtn").disabled = false;
-  $("runBtn").disabled = false;
-  const failed = queue.filter((f) => f.status === "failed").length;
-  setProgress(failed ? `Готово, с ошибками: ${failed}` : "Готово", 100);
-  if (outputs && outputs.length) {
-    lastOutputPath = outputs[outputs.length - 1];
-    $("resultActions").classList.remove("hidden");
-    const firstDone = queue.findIndex((f) => f.status === "done");
-    if (firstDone >= 0) showInPreview(firstDone);
-  }
-  renderQueue();
-  refreshModelHint();   // a model may have just been downloaded
-};
-
-function showToast(message) {
+// tone "ok" for plain notices; errors keep the red frame.
+function showToast(message, tone) {
+  document.querySelectorAll(".toast").forEach((old) => old.remove());
   const toast = document.createElement("div");
-  toast.className = "toast";
+  toast.className = "toast" + (tone === "ok" ? " ok" : "");
   toast.textContent = message;
   document.body.appendChild(toast);
   setTimeout(() => toast.remove(), 6000);
@@ -867,23 +766,12 @@ async function openCreatorChannel() {
 }
 
 window.onPipelineError = function (message) {
-  if (!isRunning) $("runBtn").disabled = false;
   setProgress("Ошибка", null);
   showToast("Ошибка: " + message);
 };
 
 async function openOutput() {
   await api().open_output_folder(lastOutputPath);
-}
-
-function playResult() {
-  const doneIndex = queue.findIndex((f) => f.status === "done");
-  if (doneIndex >= 0) {
-    showInPreview(doneIndex);
-  } else if (lastOutputPath) {
-    $("preview").src = "file:///" + lastOutputPath.replace(/\\/g, "/");
-  }
-  $("preview").play();
 }
 
 // Approximate download sizes, so the hint can warn before a long wait.
@@ -955,7 +843,7 @@ async function refreshGpuBadge() {
 
 function init() {
   setupBindings();
-  if (typeof initManualMode === "function") initManualMode();
+  if (typeof initWorkspace === "function") initWorkspace();
   applyStyleToControls();
   applyStageGeometry();
   renderSafeZones();
@@ -966,9 +854,20 @@ function init() {
   $("modelSize").addEventListener("change", updateModelHint);
 }
 
-if (window.pywebview) {
-  init();
-} else {
-  window.addEventListener("pywebviewready", init);
+// Waits for the whole page (workspace.js loads after this file) and for the
+// Python bridge, whichever comes last.
+let booted = false;
+function boot() {
+  const start = () => { if (!booted) { booted = true; init(); } };
+  if (window.pywebview && window.pywebview.api) start();
+  else window.addEventListener("pywebviewready", start, { once: true });
 }
-window.addEventListener("resize", applyStageGeometry);
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
+else boot();
+// The preview takes whatever height the column has left, so refit the frame
+// whenever that box changes (window resize, 4K scaling, panels wrapping).
+if (window.ResizeObserver) {
+  new ResizeObserver(() => applyStageGeometry()).observe(document.getElementById("previewHolder"));
+} else {
+  window.addEventListener("resize", applyStageGeometry);
+}

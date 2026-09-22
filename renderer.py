@@ -37,6 +37,14 @@ DEFAULT_STYLE = {
     "shadow_blur": 8,
     "shadow_offset": [0, 4],
 
+    # A second, independent shadow drawn under the first (e.g. a soft wide
+    # glow under a tight drop shadow).
+    "shadow2_enabled": False,
+    "shadow2_color": "#000000",
+    "shadow2_opacity": 0.35,
+    "shadow2_blur": 18,
+    "shadow2_offset": [0, 10],
+
     "highlight_style": "box",       # "color" | "box" | "none"
     "word_highlight_color": "#FF3B30",
     "active_text_color": "#FFFFFF",
@@ -49,6 +57,11 @@ DEFAULT_STYLE = {
     "line_count": 1,
     "max_width_ratio": 0.86,
     "line_spacing": 1.18,
+
+    # How words become captions: "phrases" (as many as fit), "sentences"
+    # (no full stops, each sentence starts a new caption) or "words" (one word
+    # at a time, no punctuation). Older presets carry sentence_breaks instead,
+    # which is why neither key has a default here: see caption_mode().
 
     "position": "bottom",           # "bottom" | "center" | "top"
     "position_margin": 190,
@@ -258,19 +271,34 @@ def _valid_safe_inset(value):
         return None
     return ratio if math.isfinite(ratio) and 0.0 <= ratio <= 0.5 else None
 
+def _shadow_layers(style):
+    """Enabled shadows as (rgba, blur, (dx, dy)), bottom layer first."""
+    layers = []
+    for prefix in ("shadow2", "shadow"):
+        if not style.get(f"{prefix}_enabled"):
+            continue
+        offset = style.get(f"{prefix}_offset") or [0, 0]
+        try:
+            dx, dy = float(offset[0] or 0), float(offset[1] or 0)
+        except (TypeError, ValueError, IndexError):
+            dx, dy = 0.0, 0.0
+        layers.append((
+            _hex_to_rgba(style.get(f"{prefix}_color") or "#000000",
+                         max(0.0, min(1.0, float(style.get(f"{prefix}_opacity", 0.5) or 0)))),
+            max(0.0, float(style.get(f"{prefix}_blur", 0) or 0)),
+            (dx, dy),
+        ))
+    return layers
+
 def _visual_overflow(style, position):
     pill = max(0.0, float(style.get("box_padding_y", 0) or 0)) \
         if style.get("highlight_style") == "box" else 0.0
     stroke = max(0.0, float(style.get("stroke_width", 0) or 0))
-    if not style.get("shadow_enabled"):
-        return max(pill, stroke)
-
-    blur = math.ceil(2.5 * max(0.0, float(style.get("shadow_blur", 0) or 0)))
-    offset_value = style.get("shadow_offset")
-    offset_y = float(offset_value[1] or 0) \
-        if isinstance(offset_value, (list, tuple)) and len(offset_value) > 1 else 0.0
-    directional_offset = max(0.0, -offset_y) if position == "top" else max(0.0, offset_y)
-    return max(pill, stroke) + blur + directional_offset
+    bleed = 0.0
+    for _rgba, blur, (_dx, dy) in _shadow_layers(style):
+        directional_offset = max(0.0, -dy) if position == "top" else max(0.0, dy)
+        bleed = max(bleed, math.ceil(2.5 * blur) + directional_offset)
+    return max(pill, stroke) + bleed
 
 def _effective_position_margin(style, video_h):
     try:
@@ -333,19 +361,17 @@ def _render_state_image(video_w, video_h, lines, active_line_idx, active_word_id
         line_offset = (max_width - total_width) // 2
         laid_out_lines.append((positions, line_offset))
 
-    # Shadow pass
-    if style["shadow_enabled"]:
+    # Shadow passes: "Тень 2" first, the main shadow on top of it.
+    for shadow_rgba, blur, (ox, oy) in _shadow_layers(style):
         shadow_layer = Image.new("RGBA", (video_w, video_h), (0, 0, 0, 0))
         shadow_draw = ImageDraw.Draw(shadow_layer)
-        shadow_rgba = _hex_to_rgba(style["shadow_color"], style["shadow_opacity"])
-        ox, oy = style["shadow_offset"]
         for li, (positions, line_offset) in enumerate(laid_out_lines):
             y = block_top + li * line_height
             for wp in positions:
                 x = block_left + line_offset + wp["x"]
                 shadow_draw.text((x + ox, y + oy), wp["word"], font=font, fill=shadow_rgba)
-        if style["shadow_blur"] > 0:
-            shadow_layer = shadow_layer.filter(ImageFilter.GaussianBlur(style["shadow_blur"]))
+        if blur > 0:
+            shadow_layer = shadow_layer.filter(ImageFilter.GaussianBlur(blur))
         canvas = Image.alpha_composite(canvas, shadow_layer)
         draw = ImageDraw.Draw(canvas)
 
@@ -454,7 +480,11 @@ def render_captions(video_path, segments, output_path, style=None, progress_cb=N
                 lead = " " if w["word"][:1] == " " else ""
                 w["word"] = lead + transform(w["word"].strip())
 
-    captions = segment_parser.parse(segments=segments_copy, fit_function=fit_fn)
+    mode = segment_parser.caption_mode(style)
+    captions = segment_parser.parse(
+        segments=segments_copy, fit_function=fit_fn,
+        sentence_breaks=mode == "sentences", one_word=mode == "words",
+    )
 
     clips = [video]
     total_words = sum(len(c["words"]) for c in captions)

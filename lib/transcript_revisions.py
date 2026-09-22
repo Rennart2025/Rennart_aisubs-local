@@ -77,6 +77,13 @@ class TranscriptStore:
         self._save(item_id, document)
         return copy.deepcopy(revision)
 
+    def discard(self, item_id):
+        """Forgets a file's revisions once it is removed from the list."""
+        try:
+            self._path(item_id).unlink()
+        except (FileNotFoundError, TranscriptError):
+            pass
+
     def latest(self, item_id):
         return copy.deepcopy(self._load(item_id)["revisions"][-1])
 
@@ -149,15 +156,16 @@ class TranscriptStore:
         previous = None
         for word in active:
             start, end = float(word["start"]), float(word["end"])
+            label = f"«{str(word.get('word', '')).strip()}» ({start:.2f} с)"
             if start < 0 or end <= start:
-                errors.append(f"invalid timing for {word['id']}")
+                errors.append(f"{label}: конец слова раньше начала")
             if duration and end > duration:
-                errors.append(f"word {word['id']} exceeds video duration")
+                errors.append(f"{label}: выходит за конец видео")
             if previous is not None and start < float(previous["end"]):
-                errors.append(f"word {word['id']} overlaps previous word")
+                errors.append(f"{label}: начинается раньше, чем закончилось предыдущее слово")
             previous = word
         if not active:
-            errors.append("transcript has no active words")
+            errors.append("в тексте не осталось ни одного слова")
         return errors
 
     def approve(self, item_id, revision):
