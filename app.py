@@ -29,8 +29,25 @@ from lib.transcript_revisions import RevisionConflict, TranscriptError
 PRESETS_DIR = os.path.join(BASE_DIR, "presets")
 OUTPUT_DIR = os.path.join(BASE_DIR, "output")
 REVISIONS_DIR = os.path.join(BASE_DIR, "cache", "revisions")
+APP_VERSION = "1.2.1"
 CREATOR_CHANNEL_URL = "https://t.me/daipotestit"
+CACHE_DIR = os.path.join(BASE_DIR, "cache")
+
+# Every link the window can open, by key: the page never passes a URL.
+LINKS = {
+    "author": CREATOR_CHANNEL_URL,
+    "fork_author": "https://t.me/rinatmaksutov",
+    "repo": "https://github.com/Rennart2025/Rennart_aisubs-local",
+}
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+def _human_size(num):
+    for unit in ("Б", "КБ", "МБ", "ГБ"):
+        if num < 1024 or unit == "ГБ":
+            return f"{num:.0f} {unit}" if unit in ("Б", "КБ") else f"{num:.1f} {unit}"
+        num /= 1024.0
+    return f"{num:.1f} ГБ"
+
 
 VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".wmv", ".flv", ".mpg", ".mpeg", ".ts"}
 
@@ -224,6 +241,42 @@ class Api:
         os.startfile(target)
         return True
 
+    def app_info(self):
+        """Version and the links shown in the header."""
+        return {"version": APP_VERSION, "links": dict(LINKS)}
+
+    def open_link(self, key):
+        """Opens one of the known links. A key, never a URL from the page."""
+        url = LINKS.get(str(key))
+        if not url:
+            return {"ok": False, "error": "неизвестная ссылка"}
+        try:
+            if not webbrowser.open(url, new=2):
+                return {"ok": False, "error": "Не удалось открыть браузер"}
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def cache_usage(self):
+        """How much disk the cache takes, for the badge in the header."""
+        total = files = 0
+        for root, _dirs, names in os.walk(CACHE_DIR):
+            for name in names:
+                try:
+                    total += os.path.getsize(os.path.join(root, name))
+                    files += 1
+                except OSError:
+                    pass
+        return {"bytes": total, "files": files, "text": _human_size(total)}
+
+    def open_cache_folder(self):
+        try:
+            os.makedirs(CACHE_DIR, exist_ok=True)
+            os.startfile(CACHE_DIR)
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     def open_creator_channel(self):
         try:
             if not webbrowser.open(CREATOR_CHANNEL_URL, new=2):
@@ -386,6 +439,13 @@ class Api:
         if not started:
             return {"ok": False, "error": "Дождитесь окончания текущей обработки"}
         return {"ok": True}
+
+    def set_overlays(self, item_id, overlays):
+        """Manual titles for one file: [{text, start, end}, ...]."""
+        try:
+            return {"ok": True, "job": self._manual.set_overlays(item_id, overlays or [])}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
 
     def get_transcript(self, item_id):
         try:

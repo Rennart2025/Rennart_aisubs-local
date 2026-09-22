@@ -110,9 +110,76 @@ const DEFAULT_STYLE = {
   position_margin: 190,
   position_mode: "manual",
   position_safe_inset_ratio: null,
+  word_animation: "none",   // "fade" | "pop" | "rise"
+  word_animation_ms: 220,
 };
 
+// Manual titles have their own style: no case transform, no caption mode and
+// no line limit - the text is wrapped and shrunk until it fits the block.
+const DEFAULT_TITLE_STYLE = {
+  font: "fonts/Montserrat-var.ttf#ExtraBold",
+  font_size: 96,
+  text_color: "#FFFFFF",
+  stroke_color: "#000000",
+  stroke_width: 0,
+  shadow_enabled: true,
+  shadow_color: "#000000",
+  shadow_opacity: 0.55,
+  shadow_blur: 8,
+  shadow_offset: [0, 4],
+  shadow2_enabled: false,
+  shadow2_color: "#000000",
+  shadow2_opacity: 0.35,
+  shadow2_blur: 18,
+  shadow2_offset: [0, 10],
+  highlight_style: "none",
+  word_highlight_color: "#FFD400",
+  active_text_color: "#FFFFFF",
+  box_color: "#3FA9E8",
+  box_opacity: 1.0,
+  box_radius: 16,
+  box_padding_x: 24,
+  box_padding_y: 12,
+  max_width_ratio: 0.86,
+  line_spacing: 1.18,
+  position: "center",
+  position_margin: 190,
+  anim_in_enabled: true,
+  anim_in_kind: "fade",
+  anim_in_ms: 400,
+  anim_out_enabled: true,
+  anim_out_kind: "fade",
+  anim_out_ms: 400,
+};
+
+// Titles for the first and the second slot: separate styles, so both can be
+// on screen at once in different places.
+const TITLE_SLOTS = [0, 1];
+const TITLE_DEFAULT_OVERRIDES = [
+  { position: "top", position_margin: 220 },
+  { position: "bottom", position_margin: 260 },
+];
+
 let style = Object.assign({}, DEFAULT_STYLE);
+let titleStyles = TITLE_SLOTS.map((index) =>
+  Object.assign({}, DEFAULT_TITLE_STYLE, TITLE_DEFAULT_OVERRIDES[index]));
+
+// Binding helpers write here: "title0"/"title1" pick a title, anything else
+// is the subtitle style.
+function styleFor(scope) {
+  const slot = String(scope || "").match(/^title(\d)$/);
+  return slot ? titleStyles[Number(slot[1])] : style;
+}
+
+// Arrival and departure share the kinds; only the wording differs.
+const TITLE_ANIMATION_LABELS = {
+  in: [["fade", "Плавно"], ["slide_left", "Слева"], ["slide_right", "Справа"],
+       ["slide_up", "Сверху"], ["slide_down", "Снизу"], ["zoom", "Приближение"],
+       ["blur", "Из размытия"]],
+  out: [["fade", "Плавно"], ["slide_left", "Влево"], ["slide_right", "Вправо"],
+        ["slide_up", "Вверх"], ["slide_down", "Вниз"], ["zoom", "Отдаление"],
+        ["blur", "В размытие"]],
+};
 let previewVideo = null;  // {width, height, duration} of the selected file, for 1:1 preview scaling
 let lastOutputPath = null;
 let presets = [];
@@ -127,11 +194,11 @@ function api() {
 
 // ---------------- control <-> state binding ----------------
 
-function bindRange(id, valId, key, fmt) {
+function bindRange(id, valId, key, fmt, scope) {
   const el = $(id);
   el.addEventListener("input", () => {
     const raw = parseFloat(el.value);
-    style[key] = fmt ? fmt(raw) : raw;
+    styleFor(scope)[key] = fmt ? fmt(raw) : raw;
     $(valId).textContent = fmt ? Math.round(raw) : raw;
     updatePreview();
     renderSafeZones();
@@ -139,12 +206,13 @@ function bindRange(id, valId, key, fmt) {
 }
 
 // One axis of an [x, y] offset pair.
-function bindOffset(id, valId, key, axis) {
+function bindOffset(id, valId, key, axis, scope) {
   const el = $(id);
   el.addEventListener("input", () => {
-    const pair = offsetPair(style[key]);
+    const target = styleFor(scope);
+    const pair = offsetPair(target[key]);
     pair[axis] = parseFloat(el.value);
-    style[key] = pair;
+    target[key] = pair;
     $(valId).textContent = pair[axis];
     updatePreview();
     renderSafeZones();
@@ -155,12 +223,13 @@ function offsetPair(value) {
   return Array.isArray(value) ? [Number(value[0]) || 0, Number(value[1]) || 0] : [0, 0];
 }
 
-function bindColor(colorId, hexId, key, alsoKey) {
+function bindColor(colorId, hexId, key, alsoKey, scope) {
   const colorEl = $(colorId), hexEl = $(hexId);
+  const target = () => styleFor(scope);
   colorEl.addEventListener("input", () => {
     hexEl.value = colorEl.value.toUpperCase();
-    style[key] = colorEl.value.toUpperCase();
-    if (alsoKey) style[alsoKey] = style[key];
+    target()[key] = colorEl.value.toUpperCase();
+    if (alsoKey) target()[alsoKey] = target()[key];
     updatePreview();
   });
   hexEl.addEventListener("change", () => {
@@ -168,8 +237,8 @@ function bindColor(colorId, hexId, key, alsoKey) {
     if (!v.startsWith("#")) v = "#" + v;
     if (/^#[0-9A-Fa-f]{6}$/.test(v)) {
       colorEl.value = v;
-      style[key] = v.toUpperCase();
-      if (alsoKey) style[alsoKey] = style[key];
+      target()[key] = v.toUpperCase();
+      if (alsoKey) target()[alsoKey] = target()[key];
       updatePreview();
     }
   });
@@ -270,6 +339,255 @@ function setupBindings() {
     });
   });
 
+  setupAnimationBindings();
+  setupTitleBindings();
+}
+
+function setupAnimationBindings() {
+  setupToggleGroup("wordAnimationGroup", (val) => {
+    style.word_animation = val;
+    updatePreview();
+  });
+  bindRange("s_word_animation_ms", "v_word_animation_ms", "word_animation_ms");
+}
+
+// Each title panel is the subtitle one minus case, caption mode and line
+// count, plus its own arrival and departure. Two identical panels are easier
+// to build from one template than to keep in step by hand in the markup.
+function titlePanelMarkup(i) {
+  const options = (phase) => TITLE_ANIMATION_LABELS[phase]
+    .map(([value, label]) => `<option value="${value}">${label}</option>`).join("");
+  return `
+    <div class="field-hint" style="margin-top:0;">Текст и тайминги — в колонке «Текст». Регистр, разбивка и число строк здесь не нужны: текст вписывается в блок сам.</div>
+
+    <div class="section">
+      <label>Шрифт</label>
+      <select id="t${i}_font"></select>
+
+      <label>Размер шрифта <span class="range-val" id="v_t${i}_font_size">96</span></label>
+      <input type="range" id="s_t${i}_font_size" min="30" max="220" value="96">
+
+      <label>Цвет текста</label>
+      <div class="color-row">
+        <input type="color" id="s_t${i}_text_color" value="#ffffff">
+        <input type="text" id="s_t${i}_text_color_hex" value="#FFFFFF">
+      </div>
+    </div>
+
+    <div class="section">
+      <label>Обводка <span class="range-val" id="v_t${i}_stroke_width">0</span></label>
+      <input type="range" id="s_t${i}_stroke_width" min="0" max="10" value="0">
+      <div class="color-row" style="margin-top:8px;">
+        <input type="color" id="s_t${i}_stroke_color" value="#000000">
+        <input type="text" id="s_t${i}_stroke_color_hex" value="#000000">
+      </div>
+
+      <div class="switch-row">
+        <label>Тень</label>
+        <label class="switch"><input type="checkbox" id="s_t${i}_shadow_enabled" checked><span class="slider-toggle"></span></label>
+      </div>
+      <div id="t${i}ShadowParams">
+        <div class="row">
+          <div>
+            <label>Размытие <span class="range-val" id="v_t${i}_shadow_blur">8</span></label>
+            <input type="range" id="s_t${i}_shadow_blur" min="0" max="40" value="8">
+          </div>
+          <div>
+            <label>Прозрачность <span class="range-val" id="v_t${i}_shadow_opacity">55</span></label>
+            <input type="range" id="s_t${i}_shadow_opacity" min="0" max="100" value="55">
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label>Offset X <span class="range-val" id="v_t${i}_shadow_offset_x">0</span></label>
+            <input type="range" id="s_t${i}_shadow_offset_x" min="-40" max="40" value="0">
+          </div>
+          <div>
+            <label>Offset Y <span class="range-val" id="v_t${i}_shadow_offset_y">4</span></label>
+            <input type="range" id="s_t${i}_shadow_offset_y" min="-40" max="40" value="4">
+          </div>
+        </div>
+      </div>
+
+      <div class="switch-row">
+        <label>Тень 2</label>
+        <label class="switch"><input type="checkbox" id="s_t${i}_shadow2_enabled"><span class="slider-toggle"></span></label>
+      </div>
+      <div id="t${i}Shadow2Params">
+        <div class="row">
+          <div>
+            <label>Размытие <span class="range-val" id="v_t${i}_shadow2_blur">18</span></label>
+            <input type="range" id="s_t${i}_shadow2_blur" min="0" max="40" value="18">
+          </div>
+          <div>
+            <label>Прозрачность <span class="range-val" id="v_t${i}_shadow2_opacity">35</span></label>
+            <input type="range" id="s_t${i}_shadow2_opacity" min="0" max="100" value="35">
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label>Offset X <span class="range-val" id="v_t${i}_shadow2_offset_x">0</span></label>
+            <input type="range" id="s_t${i}_shadow2_offset_x" min="-40" max="40" value="0">
+          </div>
+          <div>
+            <label>Offset Y <span class="range-val" id="v_t${i}_shadow2_offset_y">10</span></label>
+            <input type="range" id="s_t${i}_shadow2_offset_y" min="-40" max="40" value="10">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <label>Статичный эффект</label>
+      <div class="toggle-group" id="t${i}HighlightStyleGroup">
+        <button data-val="box">Плашка</button>
+        <button data-val="color">Цвет</button>
+        <button data-val="none" class="active">Без</button>
+      </div>
+      <div class="field-hint">Плашка рисуется под каждой строкой заголовка.</div>
+
+      <div id="t${i}BoxParams" class="hidden">
+        <label>Цвет плашки</label>
+        <div class="color-row">
+          <input type="color" id="s_t${i}_box_color" value="#3fa9e8">
+          <input type="text" id="s_t${i}_box_color_hex" value="#3FA9E8">
+        </div>
+        <label>Цвет текста на плашке</label>
+        <div class="color-row">
+          <input type="color" id="s_t${i}_active_text_color" value="#ffffff">
+          <input type="text" id="s_t${i}_active_text_color_hex" value="#FFFFFF">
+        </div>
+        <label>Скругление <span class="range-val" id="v_t${i}_box_radius">16</span></label>
+        <input type="range" id="s_t${i}_box_radius" min="0" max="50" value="16">
+        <div class="row">
+          <div>
+            <label>Отступ X <span class="range-val" id="v_t${i}_box_padding_x">24</span></label>
+            <input type="range" id="s_t${i}_box_padding_x" min="0" max="60" value="24">
+          </div>
+          <div>
+            <label>Отступ Y <span class="range-val" id="v_t${i}_box_padding_y">12</span></label>
+            <input type="range" id="s_t${i}_box_padding_y" min="0" max="40" value="12">
+          </div>
+        </div>
+      </div>
+
+      <div id="t${i}ColorParams" class="hidden">
+        <label>Цвет текста заголовка</label>
+        <div class="color-row">
+          <input type="color" id="s_t${i}_word_highlight_color" value="#ffd400">
+          <input type="text" id="s_t${i}_word_highlight_color_hex" value="#FFD400">
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <label>Позиция</label>
+      <div class="toggle-group" id="t${i}PositionGroup">
+        <button data-val="top">Верх</button>
+        <button data-val="center">Центр</button>
+        <button data-val="bottom">Низ</button>
+      </div>
+
+      <label>Отступ от края <span class="range-val" id="v_t${i}_position_margin">190</span></label>
+      <input type="range" id="s_t${i}_position_margin" min="20" max="960" value="190">
+
+      <label>Ширина блока <span class="range-val" id="v_t${i}_max_width_ratio">86</span></label>
+      <input type="range" id="s_t${i}_max_width_ratio" min="40" max="100" value="86">
+    </div>
+
+    <div class="section">
+      <div class="switch-row">
+        <label>Fade in — появление</label>
+        <label class="switch"><input type="checkbox" id="s_t${i}_anim_in_enabled" checked><span class="slider-toggle"></span></label>
+      </div>
+      <div id="t${i}AnimInParams">
+        <select id="t${i}_anim_in_kind">${options("in")}</select>
+        <label>Длительность, мс <span class="range-val" id="v_t${i}_anim_in_ms">400</span></label>
+        <input type="range" id="s_t${i}_anim_in_ms" min="80" max="2000" step="20" value="400">
+      </div>
+
+      <div class="switch-row">
+        <label>Fade out — исчезание</label>
+        <label class="switch"><input type="checkbox" id="s_t${i}_anim_out_enabled" checked><span class="slider-toggle"></span></label>
+      </div>
+      <div id="t${i}AnimOutParams">
+        <select id="t${i}_anim_out_kind">${options("out")}</select>
+        <label>Длительность, мс <span class="range-val" id="v_t${i}_anim_out_ms">400</span></label>
+        <input type="range" id="s_t${i}_anim_out_ms" min="80" max="2000" step="20" value="400">
+      </div>
+      <div class="field-hint">Появление и исчезание никогда не занимают больше половины времени заголовка.</div>
+    </div>`;
+}
+
+function setupTitleBindings() {
+  TITLE_SLOTS.forEach((i) => {
+    $(`titlePanel${i}`).innerHTML = titlePanelMarkup(i);
+    bindTitlePanel(i);
+  });
+}
+
+function bindTitlePanel(i) {
+  const scope = "title" + i;
+  const target = () => titleStyles[i];
+
+  $(`t${i}_font`).addEventListener("change", () => {
+    target().font = $(`t${i}_font`).value;
+    updatePreview();
+  });
+  bindRange(`s_t${i}_font_size`, `v_t${i}_font_size`, "font_size", null, scope);
+  bindColor(`s_t${i}_text_color`, `s_t${i}_text_color_hex`, "text_color", null, scope);
+
+  bindRange(`s_t${i}_stroke_width`, `v_t${i}_stroke_width`, "stroke_width", null, scope);
+  bindColor(`s_t${i}_stroke_color`, `s_t${i}_stroke_color_hex`, "stroke_color", null, scope);
+
+  $(`s_t${i}_shadow_enabled`).addEventListener("change", () => {
+    target().shadow_enabled = $(`s_t${i}_shadow_enabled`).checked;
+    $(`t${i}ShadowParams`).classList.toggle("hidden", !target().shadow_enabled);
+    updatePreview();
+  });
+  bindRange(`s_t${i}_shadow_blur`, `v_t${i}_shadow_blur`, "shadow_blur", null, scope);
+  bindRange(`s_t${i}_shadow_opacity`, `v_t${i}_shadow_opacity`, "shadow_opacity", (v) => v / 100, scope);
+  bindOffset(`s_t${i}_shadow_offset_x`, `v_t${i}_shadow_offset_x`, "shadow_offset", 0, scope);
+  bindOffset(`s_t${i}_shadow_offset_y`, `v_t${i}_shadow_offset_y`, "shadow_offset", 1, scope);
+
+  $(`s_t${i}_shadow2_enabled`).addEventListener("change", () => {
+    target().shadow2_enabled = $(`s_t${i}_shadow2_enabled`).checked;
+    $(`t${i}Shadow2Params`).classList.toggle("hidden", !target().shadow2_enabled);
+    updatePreview();
+  });
+  bindRange(`s_t${i}_shadow2_blur`, `v_t${i}_shadow2_blur`, "shadow2_blur", null, scope);
+  bindRange(`s_t${i}_shadow2_opacity`, `v_t${i}_shadow2_opacity`, "shadow2_opacity", (v) => v / 100, scope);
+  bindOffset(`s_t${i}_shadow2_offset_x`, `v_t${i}_shadow2_offset_x`, "shadow2_offset", 0, scope);
+  bindOffset(`s_t${i}_shadow2_offset_y`, `v_t${i}_shadow2_offset_y`, "shadow2_offset", 1, scope);
+
+  setupToggleGroup(`t${i}HighlightStyleGroup`, (val) => {
+    target().highlight_style = val;
+    $(`t${i}BoxParams`).classList.toggle("hidden", val !== "box");
+    $(`t${i}ColorParams`).classList.toggle("hidden", val !== "color");
+    updatePreview();
+  });
+  bindColor(`s_t${i}_box_color`, `s_t${i}_box_color_hex`, "box_color", null, scope);
+  bindColor(`s_t${i}_active_text_color`, `s_t${i}_active_text_color_hex`, "active_text_color", null, scope);
+  bindRange(`s_t${i}_box_radius`, `v_t${i}_box_radius`, "box_radius", null, scope);
+  bindRange(`s_t${i}_box_padding_x`, `v_t${i}_box_padding_x`, "box_padding_x", null, scope);
+  bindRange(`s_t${i}_box_padding_y`, `v_t${i}_box_padding_y`, "box_padding_y", null, scope);
+  bindColor(`s_t${i}_word_highlight_color`, `s_t${i}_word_highlight_color_hex`, "word_highlight_color", null, scope);
+
+  setupToggleGroup(`t${i}PositionGroup`, (val) => { target().position = val; updatePreview(); });
+  bindRange(`s_t${i}_position_margin`, `v_t${i}_position_margin`, "position_margin", null, scope);
+  bindRange(`s_t${i}_max_width_ratio`, `v_t${i}_max_width_ratio`, "max_width_ratio", (v) => v / 100, scope);
+
+  ["in", "out"].forEach((phase) => {
+    const block = phase === "in" ? "AnimIn" : "AnimOut";
+    $(`s_t${i}_anim_${phase}_enabled`).addEventListener("change", () => {
+      target()[`anim_${phase}_enabled`] = $(`s_t${i}_anim_${phase}_enabled`).checked;
+      $(`t${i}${block}Params`).classList.toggle("hidden", !target()[`anim_${phase}_enabled`]);
+    });
+    $(`t${i}_anim_${phase}_kind`).addEventListener("change", () => {
+      target()[`anim_${phase}_kind`] = $(`t${i}_anim_${phase}_kind`).value;
+    });
+    bindRange(`s_t${i}_anim_${phase}_ms`, `v_t${i}_anim_${phase}_ms`, `anim_${phase}_ms`, null, scope);
+  });
 }
 
 function setupToggleGroup(groupId, onChange) {
@@ -328,6 +646,11 @@ function applyStyleToControls() {
   const mwr = Math.round(style.max_width_ratio * 100);
   $("s_max_width_ratio").value = mwr; $("v_max_width_ratio").textContent = mwr;
 
+  setActiveToggle("wordAnimationGroup", style.word_animation || "none");
+  $("s_word_animation_ms").value = style.word_animation_ms;
+  $("v_word_animation_ms").textContent = style.word_animation_ms;
+  applyTitleControls();
+
   setActiveToggle("highlightStyleGroup", style.highlight_style);
   setActiveToggle("positionGroup", style.position);
   $("boxParams").classList.toggle("hidden", style.highlight_style !== "box");
@@ -343,6 +666,63 @@ const CAPTION_MODE_HINTS = {
 
 function updateCaptionModeHint() {
   $("captionModeHint").textContent = CAPTION_MODE_HINTS[ManualState.captionModeOf(style)];
+}
+
+function applyTitleControls() {
+  TITLE_SLOTS.forEach(applyTitlePanel);
+}
+
+function applyTitlePanel(i) {
+  const t = titleStyles[i];
+  if (fontCatalog.length) renderFontOptions(); else $(`t${i}_font`).value = t.font;
+  $(`s_t${i}_font_size`).value = t.font_size; $(`v_t${i}_font_size`).textContent = t.font_size;
+  $(`s_t${i}_text_color`).value = t.text_color;
+  $(`s_t${i}_text_color_hex`).value = t.text_color.toUpperCase();
+
+  $(`s_t${i}_stroke_width`).value = t.stroke_width; $(`v_t${i}_stroke_width`).textContent = t.stroke_width;
+  $(`s_t${i}_stroke_color`).value = t.stroke_color;
+  $(`s_t${i}_stroke_color_hex`).value = t.stroke_color.toUpperCase();
+
+  [["", "shadow"], ["2", "shadow2"]].forEach(([suffix, key]) => {
+    const enabled = Boolean(t[`${key}_enabled`]);
+    $(`s_t${i}_${key}_enabled`).checked = enabled;
+    $(`t${i}Shadow${suffix}Params`).classList.toggle("hidden", !enabled);
+    $(`s_t${i}_${key}_blur`).value = t[`${key}_blur`];
+    $(`v_t${i}_${key}_blur`).textContent = t[`${key}_blur`];
+    const pct = Math.round(t[`${key}_opacity`] * 100);
+    $(`s_t${i}_${key}_opacity`).value = pct; $(`v_t${i}_${key}_opacity`).textContent = pct;
+    const [x, y] = offsetPair(t[`${key}_offset`]);
+    $(`s_t${i}_${key}_offset_x`).value = x; $(`v_t${i}_${key}_offset_x`).textContent = x;
+    $(`s_t${i}_${key}_offset_y`).value = y; $(`v_t${i}_${key}_offset_y`).textContent = y;
+  });
+
+  setActiveToggle(`t${i}HighlightStyleGroup`, t.highlight_style);
+  $(`t${i}BoxParams`).classList.toggle("hidden", t.highlight_style !== "box");
+  $(`t${i}ColorParams`).classList.toggle("hidden", t.highlight_style !== "color");
+  $(`s_t${i}_box_color`).value = t.box_color; $(`s_t${i}_box_color_hex`).value = t.box_color.toUpperCase();
+  $(`s_t${i}_active_text_color`).value = t.active_text_color;
+  $(`s_t${i}_active_text_color_hex`).value = t.active_text_color.toUpperCase();
+  $(`s_t${i}_box_radius`).value = t.box_radius; $(`v_t${i}_box_radius`).textContent = t.box_radius;
+  $(`s_t${i}_box_padding_x`).value = t.box_padding_x; $(`v_t${i}_box_padding_x`).textContent = t.box_padding_x;
+  $(`s_t${i}_box_padding_y`).value = t.box_padding_y; $(`v_t${i}_box_padding_y`).textContent = t.box_padding_y;
+  $(`s_t${i}_word_highlight_color`).value = t.word_highlight_color;
+  $(`s_t${i}_word_highlight_color_hex`).value = t.word_highlight_color.toUpperCase();
+
+  setActiveToggle(`t${i}PositionGroup`, t.position);
+  $(`s_t${i}_position_margin`).value = t.position_margin;
+  $(`v_t${i}_position_margin`).textContent = t.position_margin;
+  const width = Math.round(t.max_width_ratio * 100);
+  $(`s_t${i}_max_width_ratio`).value = width; $(`v_t${i}_max_width_ratio`).textContent = width;
+
+  ["in", "out"].forEach((phase) => {
+    const block = phase === "in" ? "AnimIn" : "AnimOut";
+    const enabled = Boolean(t[`anim_${phase}_enabled`]);
+    $(`s_t${i}_anim_${phase}_enabled`).checked = enabled;
+    $(`t${i}${block}Params`).classList.toggle("hidden", !enabled);
+    $(`t${i}_anim_${phase}_kind`).value = t[`anim_${phase}_kind`] || "fade";
+    $(`s_t${i}_anim_${phase}_ms`).value = t[`anim_${phase}_ms`];
+    $(`v_t${i}_anim_${phase}_ms`).textContent = t[`anim_${phase}_ms`];
+  });
 }
 
 function setActiveToggle(groupId, val) {
@@ -413,11 +793,13 @@ function updatePreview() {
   });
 
   trimToLineCount(line, activeIdx);
+  updateTitlePreview();
 }
 
 // CSS paints the first shadow on top, the renderer draws "Тень 2" first and
 // the main shadow over it - so the main one is listed first here.
-function previewShadows(scale) {
+function previewShadows(scale, source) {
+  const from = source || style;
   const layer = (enabled, color, opacity, blur, offset) => {
     if (!enabled) return null;
     const [dx, dy] = offsetPair(offset);
@@ -426,10 +808,74 @@ function previewShadows(scale) {
     return `${dx * scale}px ${dy * scale}px ${(Number(blur) || 0) * scale}px rgba(${r},${g},${b},${opacity})`;
   };
   const layers = [
-    layer(style.shadow_enabled, style.shadow_color, style.shadow_opacity, style.shadow_blur, style.shadow_offset),
-    layer(style.shadow2_enabled, style.shadow2_color, style.shadow2_opacity, style.shadow2_blur, style.shadow2_offset),
+    layer(from.shadow_enabled, from.shadow_color, from.shadow_opacity, from.shadow_blur, from.shadow_offset),
+    layer(from.shadow2_enabled, from.shadow2_color, from.shadow2_opacity, from.shadow2_blur, from.shadow2_offset),
   ].filter(Boolean);
   return layers.length ? layers.join(", ") : "none";
+}
+
+// The manual titles over the preview frame: same geometry the renderer uses,
+// shrunk the same way when the text does not fit its block. Both are drawn,
+// so overlapping titles look here the way they will in the video.
+function updateTitlePreview() {
+  const texts = typeof currentTitleTexts === "function" ? currentTitleTexts() : ["", ""];
+  TITLE_SLOTS.forEach((i) => drawTitleLine(i, texts[i] || ""));
+}
+
+function drawTitleLine(i, text) {
+  const stage = $("previewStage");
+  const line = $(`titleLine${i}`);
+  if (!text) {
+    line.style.display = "none";
+    return;
+  }
+  line.style.display = "block";
+
+  const titleStyle = titleStyles[i];
+  const videoWidth = (previewVideo && previewVideo.width) || 1080;
+  const scale = stage.clientWidth / videoWidth;
+  const [family, weight, italic] = fontCss(titleStyle.font);
+  const box = titleStyle.highlight_style === "box";
+
+  let inner = line.firstElementChild;
+  if (!inner) {
+    inner = document.createElement("span");
+    line.appendChild(inner);
+  }
+  inner.textContent = text;
+  inner.style.setProperty("-webkit-box-decoration-break", "clone");
+  inner.style.boxDecorationBreak = "clone";
+  inner.style.background = box ? titleStyle.box_color : "transparent";
+  inner.style.borderRadius = box ? (titleStyle.box_radius * scale) + "px" : "0";
+  inner.style.padding = box
+    ? `${titleStyle.box_padding_y * scale}px ${titleStyle.box_padding_x * scale}px` : "0";
+  inner.style.color = box ? titleStyle.active_text_color
+    : titleStyle.highlight_style === "color" ? titleStyle.word_highlight_color : titleStyle.text_color;
+
+  line.style.fontFamily = family;
+  line.style.fontWeight = weight;
+  line.style.fontStyle = italic ? "italic" : "normal";
+  line.style.textShadow = previewShadows(scale, titleStyle);
+  line.style.setProperty("-webkit-text-stroke",
+    titleStyle.stroke_width > 0 ? `${titleStyle.stroke_width * scale}px ${titleStyle.stroke_color}` : "0px transparent");
+  line.style.width = (titleStyle.max_width_ratio * 100) + "%";
+
+  // Shrink until the block fits the same budget as in renderer.render_title_image.
+  const budget = stage.clientHeight * 0.38;
+  let size = Math.max(6, titleStyle.font_size * scale);
+  line.style.fontSize = size + "px";
+  for (let guard = 0; guard < 30 && line.scrollHeight > budget && size > 6; guard++) {
+    size *= 0.92;
+    line.style.fontSize = size + "px";
+  }
+
+  const margin = titleStyle.position_margin * scale;
+  const height = line.offsetHeight;
+  let top;
+  if (titleStyle.position === "top") top = margin;
+  else if (titleStyle.position === "bottom") top = stage.clientHeight - margin - height;
+  else top = (stage.clientHeight - height) / 2;
+  line.style.top = Math.max(0, Math.min(top, stage.clientHeight - height)) + "px";
 }
 
 function renderSafeZones() {
@@ -547,6 +993,18 @@ function renderFontOptions() {
 
   select.value = style.font;
   $("fontCount").textContent = `— ${visible.length}`;
+
+  // The titles use the same catalogue; each keeps its own face selected.
+  TITLE_SLOTS.forEach((i) => {
+    const titleSelect = $(`t${i}_font`);
+    if (!titleSelect) return;
+    titleSelect.innerHTML = select.innerHTML;
+    titleSelect.value = titleStyles[i].font;
+    if (!titleSelect.value && fontCatalog.length) {
+      titleSelect.value = select.value;
+      titleStyles[i].font = select.value;
+    }
+  });
 }
 
 // ---------------- presets ----------------
@@ -594,6 +1052,13 @@ function renderPresetGrid() {
     }
     card.addEventListener("click", () => {
       style = Object.assign({}, DEFAULT_STYLE, p);
+      delete style.title_style;
+      delete style.title_styles;
+      const saved = p.title_styles || (p.title_style ? [p.title_style, p.title_style] : null);
+      if (saved) {
+        titleStyles = TITLE_SLOTS.map((i) => Object.assign(
+          {}, DEFAULT_TITLE_STYLE, TITLE_DEFAULT_OVERRIDES[i], saved[i] || saved[0]));
+      }
       applyStyleToControls();
       updatePreview();
       document.querySelectorAll(".preset-card").forEach((c) => c.classList.remove("active"));
@@ -635,7 +1100,7 @@ async function deletePreset(preset, card) {
 async function savePreset() {
   const name = $("presetSaveName").value.trim();
   if (!name) return;
-  const toSave = Object.assign({}, style, { name });
+  const toSave = Object.assign({}, style, { name, title_styles: titleStyles });
   await api().save_preset(name, toSave);
   await loadPresets();
 }
@@ -765,6 +1230,32 @@ async function openCreatorChannel() {
   return CreatorChannel.openCreatorChannel(api(), showToast);
 }
 
+async function openProjectLink(key) {
+  return CreatorChannel.openProjectLink(api(), key, showToast);
+}
+
+async function openCacheFolder() {
+  const result = await api().open_cache_folder();
+  if (!result || !result.ok) showToast("Не удалось открыть папку кэша");
+}
+
+async function refreshAppInfo() {
+  try {
+    const info = await api().app_info();
+    if (info && info.version) $("appVersion").textContent = "v" + info.version;
+  } catch (e) { /* the header simply stays without a version */ }
+}
+
+// How much disk the cache takes, next to the GPU badge.
+async function refreshCacheBadge() {
+  try {
+    const usage = await api().cache_usage();
+    if (!usage) return;
+    $("cacheBadge").textContent = "Кэш " + usage.text;
+    $("cacheBadge").title = `${usage.files} файлов в папке cache — нажмите, чтобы открыть`;
+  } catch (e) { /* leave the dash */ }
+}
+
 window.onPipelineError = function (message) {
   setProgress("Ошибка", null);
   showToast("Ошибка: " + message);
@@ -850,6 +1341,8 @@ function init() {
   loadPresets();
   loadFonts();
   refreshGpuBadge();
+  refreshAppInfo();
+  refreshCacheBadge();
   refreshModelHint(true);
   $("modelSize").addEventListener("change", updateModelHint);
 }

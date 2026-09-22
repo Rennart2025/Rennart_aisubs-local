@@ -134,12 +134,20 @@ class ReadmeTests(unittest.TestCase):
         self.path = ROOT / "README.md"
         self.markdown = self.path.read_text(encoding="utf-8")
 
-    def test_readme_links_to_the_product_page_channel_and_manual_proof(self):
+    def test_readme_credits_this_fork_and_keeps_the_original_attribution(self):
+        """MIT only asks that the original author stays credited."""
         targets = re.findall(r"\[[^]]*\]\(([^)]+)\)", self.markdown)
 
-        self.assertIn("https://jimmorisedu-boop.github.io/aisubs-local/", targets)
+        self.assertIn("https://github.com/Rennart2025/Rennart_aisubs-local", targets)
+        self.assertIn("https://t.me/rinatmaksutov", targets)
+        self.assertIn("https://github.com/jimmorisedu-boop/aisubs-local", targets)
         self.assertIn("https://t.me/daipotestit", targets)
-        self.assertIn("docs/screenshot-manual.png", targets)
+
+    def test_readme_opens_with_a_screenshot_of_the_current_interface(self):
+        images = re.findall(r"!\[[^]]*\]\(([^)]+)\)", self.markdown)
+
+        self.assertTrue(images, "README has no screenshot")
+        self.assertTrue((self.path.parent / images[0]).is_file(), images[0])
 
     def test_readme_relative_images_resolve(self):
         for target in re.findall(r"!\[[^]]*\]\(([^)]+)\)", self.markdown):

@@ -59,6 +59,7 @@ async function initWorkspace() {
   });
   setupPlayer();
   setupDropHighlight();
+  setupTitleFields();
   loadTypography();
 
   try {
@@ -67,6 +68,105 @@ async function initWorkspace() {
   } catch (e) { /* bridge not ready: the first update will fill the list */ }
   if (ws && ws.items.length && !selectedId) selectItem(ws.items[0].item_id);
   updateActionButtons();
+}
+
+// ---------------- manual titles ----------------
+//
+// Two lines of text with their own timings, stored per video in Python
+// (lib/manual_jobs.py). The renderer draws them over the frame; nothing here
+// touches the recognised words.
+
+let titleSaveTimer = null;
+let focusedTitleIndex = null;
+
+function titleRows() {
+  return Array.from(document.querySelectorAll("#titlesBlock .title-row"));
+}
+
+function setupTitleFields() {
+  titleRows().forEach((row) => {
+    const text = row.querySelector(".title-text");
+    const times = row.querySelectorAll(".title-time");
+    const index = Number(row.dataset.index);
+
+    const touched = () => {
+      markTitleProblems();
+      updatePreview();
+      clearTimeout(titleSaveTimer);
+      titleSaveTimer = setTimeout(saveTitles, 600);
+    };
+    text.addEventListener("input", touched);
+    times.forEach((input) => {
+      input.addEventListener("input", touched);
+      // The timings come from watching the video, so take them from there.
+      input.addEventListener("dblclick", () => {
+        const player = video();
+        if (!player.currentSrc) return;
+        input.value = player.currentTime.toFixed(1);
+        touched();
+      });
+    });
+
+    [text, ...times].forEach((input) => {
+      input.addEventListener("focus", () => { focusedTitleIndex = index; updatePreview(); });
+      input.addEventListener("blur", () => {
+        if (focusedTitleIndex === index) focusedTitleIndex = null;
+        updatePreview();
+      });
+    });
+  });
+}
+
+function readTitles() {
+  return titleRows().map((row) => ({
+    text: row.querySelector(".title-text").value,
+    start: Number(row.querySelector('[data-field="start"]').value) || 0,
+    end: Number(row.querySelector('[data-field="end"]').value) || 0,
+  }));
+}
+
+function fillTitleFields(overlays) {
+  titleRows().forEach((row, index) => {
+    const overlay = (overlays || [])[index] || { text: "", start: 0, end: 0 };
+    row.querySelector(".title-text").value = overlay.text || "";
+    row.querySelector('[data-field="start"]').value = Number(overlay.start || 0).toFixed(1);
+    row.querySelector('[data-field="end"]').value = Number(overlay.end || 0).toFixed(1);
+  });
+  markTitleProblems();
+}
+
+// A title with text but no length would silently never show up.
+function markTitleProblems() {
+  titleRows().forEach((row) => {
+    const overlay = readTitles()[Number(row.dataset.index)];
+    row.classList.toggle("bad", Boolean(overlay.text.trim()) && overlay.end <= overlay.start);
+  });
+}
+
+async function saveTitles() {
+  clearTimeout(titleSaveTimer);
+  if (!selectedId) return;
+  const result = await api().set_overlays(selectedId, readTitles());
+  if (!result || !result.ok) {
+    showToast("Заголовки не сохранены: " + ((result && result.error) || "ошибка"));
+    return;
+  }
+  applySnapshot(result.job);
+}
+
+// What the preview should draw right now, per title: the one being edited,
+// and every title whose time range the playhead is inside. Both can show at
+// the same moment, exactly as they will in the video.
+function currentTitleTexts() {
+  if (showingOutput || !selectedId) return ["", ""];
+  const time = video().currentTime;
+  return readTitles().map((overlay, index) => {
+    const text = (overlay.text || "").trim();
+    if (!text) return "";
+    if (index === focusedTitleIndex) return overlay.text;
+    const live = overlay.end > overlay.start && time >= overlay.start && time <= overlay.end;
+    return live ? overlay.text : "";
+  });
 }
 
 // Files dropped on the window reach Python through pywebview's DOM events
@@ -152,7 +252,10 @@ function applySnapshot(snapshot) {
   const outputs = ws.items.filter((candidate) => candidate.output);
   if (outputs.length) lastOutputPath = outputs[outputs.length - 1].output;
 
-  if (wasBusy && !isRunning) refreshModelHint();   // a model may have just been downloaded
+  if (wasBusy && !isRunning) {
+    refreshModelHint();      // a model may have just been downloaded
+    refreshCacheBadge();     // and the cache has just grown
+  }
   wasBusy = isRunning;
 }
 
@@ -297,7 +400,10 @@ function updateProgress() {
 
 async function selectItem(itemId) {
   if (!itemId) return;
-  if (selectedId && selectedId !== itemId) await flushPatches();
+  if (selectedId && selectedId !== itemId) {
+    await flushPatches();
+    if (titleSaveTimer) await saveTitles();
+  }
   const changed = selectedId !== itemId;
   selectedId = itemId;
   if (changed) {
@@ -571,6 +677,9 @@ function escapeHtml(text) {
 function renderEditor() {
   const item = selectedItem();
   $("editorFileName").textContent = item ? item.name : "";
+  if (item && document.activeElement && !document.activeElement.closest("#titlesBlock")) {
+    fillTitleFields(item.overlays);
+  }
   if (!item) {
     return setEditorEmpty(ws && ws.items.length
       ? "Выберите видео в списке слева."
@@ -840,7 +949,9 @@ async function runRender() {
     showToast("Есть ошибки в таймингах, эти файлы не отрендерятся: " + names.join(", "));
   }
   lastMessage = "";
-  const result = await api().render({ item_ids: actions.render.ids, style });
+  await saveTitles();
+  const payload = Object.assign({}, style, { title_styles: titleStyles });
+  const result = await api().render({ item_ids: actions.render.ids, style: payload });
   if (!result || !result.ok) showToast((result && result.error) || "Рендер не запущен");
 }
 

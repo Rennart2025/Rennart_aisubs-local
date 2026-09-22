@@ -62,7 +62,8 @@ class PipelinePhaseTests(unittest.TestCase):
 
         self.assertEqual(str(output), result["output"])
         renderer.assert_called_once_with(
-            str(self.video), segments, str(output), style={"font_size": 50}, progress_cb=None
+            str(self.video), segments, str(output), style={"font_size": 50},
+            progress_cb=None, overlays=None,
         )
 
     def test_render_phase_rejects_empty_transcript_before_encoding_video(self):

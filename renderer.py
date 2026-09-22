@@ -15,7 +15,7 @@ import copy
 import math
 
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
-from moviepy import VideoFileClip, ImageClip, CompositeVideoClip
+from moviepy import VideoFileClip, ImageClip, CompositeVideoClip, vfx
 import proglog
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "lib"))
@@ -65,7 +65,64 @@ DEFAULT_STYLE = {
 
     "position": "bottom",           # "bottom" | "center" | "top"
     "position_margin": 190,
+
+    # How a caption arrives on screen: "none" | "fade" | "pop" | "rise".
+    "word_animation": "none",
+    "word_animation_ms": 220,
 }
+
+# Manual titles ("Заголовки"): static text shown between two timestamps. No
+# case transform and no line limit - the text is wrapped and shrunk until it
+# fits the block. The word highlight becomes a plain static effect: a plate
+# behind the text ("box") or another text colour ("color").
+TITLE_STYLE = {
+    "font": "fonts/Montserrat-var.ttf#ExtraBold",
+    "font_size": 96,
+
+    "text_color": "#FFFFFF",
+    "stroke_color": "#000000",
+    "stroke_width": 0,
+
+    "shadow_enabled": True,
+    "shadow_color": "#000000",
+    "shadow_opacity": 0.55,
+    "shadow_blur": 8,
+    "shadow_offset": [0, 4],
+
+    "shadow2_enabled": False,
+    "shadow2_color": "#000000",
+    "shadow2_opacity": 0.35,
+    "shadow2_blur": 18,
+    "shadow2_offset": [0, 10],
+
+    "highlight_style": "none",      # "box" | "color" | "none"
+    "word_highlight_color": "#FF3B30",
+    "active_text_color": "#FFFFFF",
+    "box_color": "#3FA9E8",
+    "box_opacity": 1.0,
+    "box_radius": 16,
+    "box_padding_x": 24,
+    "box_padding_y": 12,
+
+    "max_width_ratio": 0.86,
+    "line_spacing": 1.18,
+
+    "position": "center",
+    "position_margin": 190,
+
+    # Arrival and departure, set apart: each has a switch, a kind and a length.
+    "anim_in_enabled": True,
+    "anim_in_kind": "fade",
+    "anim_in_ms": 400,
+    "anim_out_enabled": True,
+    "anim_out_kind": "fade",
+    "anim_out_ms": 400,
+}
+
+# What a title can do on its way in and out. A side means where it comes from
+# (in) or where it leaves to (out).
+TITLE_ANIMATIONS = ("fade", "slide_left", "slide_right", "slide_up", "slide_down", "zoom", "blur")
+_BLUR_STEPS = 10
 
 def _hex_to_rgba(color, opacity=1.0):
     if isinstance(color, (list, tuple)):
@@ -424,6 +481,407 @@ def _render_state_image(video_w, video_h, lines, active_line_idx, active_word_id
 
     return canvas
 
+def _ease_out_back(p):
+    """0 -> 1 with a small overshoot, so a caption lands with a little bounce."""
+    c = 1.70158
+    q = p - 1.0
+    return 1 + (c + 1) * q ** 3 + c * q ** 2
+
+
+def _ease_out_cubic(p):
+    """0 -> 1, fast then settling, without overshooting the target."""
+    return 1 - (1 - p) ** 3
+
+
+# How much of the animation the fade-in takes. Movement has to stay visible
+# while the caption is still see-through: a pop that finishes under a fade
+# reads as a plain fade.
+_FADE_SHARE = {"fade": 1.0, "pop": 0.45, "rise": 0.6}
+
+
+def _animation_for(style):
+    """(kind, seconds) for the appearance animation, or (None, 0)."""
+    kind = str(style.get("word_animation") or "none").lower()
+    if kind not in ("fade", "pop", "rise"):
+        return None, 0.0
+    try:
+        seconds = max(0.0, float(style.get("word_animation_ms", 0) or 0)) / 1000.0
+    except (TypeError, ValueError):
+        seconds = 0.0
+    return (kind, seconds) if seconds > 0 else (None, 0.0)
+
+
+def _image_clip(frame_img, start, duration, animation=(None, 0.0)):
+    """An ImageClip cropped to the ink, placed where the ink was.
+
+    Cropping keeps the clip small (a caption covers a fraction of the frame)
+    and gives the animation a box to scale and move around, which a
+    full-frame image cannot have.
+    """
+    import numpy as np
+
+    bbox = frame_img.getbbox()
+    if not bbox or duration <= 0:
+        return None
+    left, top, right, bottom = bbox
+    width, height = right - left, bottom - top
+    clip = ImageClip(np.array(frame_img.crop(bbox)), transparent=True)
+    clip = clip.with_start(start).with_duration(duration)
+
+    kind, seconds = animation
+    seconds = min(seconds, duration)
+    if not kind or seconds <= 0:
+        return clip.with_position((left, top))
+
+    if kind == "pop":
+        center_x, center_y = left + width / 2.0, top + height / 2.0
+
+        def scale(t):
+            if t >= seconds:
+                return 1.0
+            return 0.55 + 0.45 * _ease_out_back(t / seconds)
+
+        clip = clip.resized(scale)
+        clip = clip.with_position(
+            lambda t: (center_x - width * scale(t) / 2.0, center_y - height * scale(t) / 2.0)
+        )
+    elif kind == "rise":
+        travel = height * 0.8
+
+        def offset(t):
+            if t >= seconds:
+                return 0.0
+            return travel * (1.0 - _ease_out_cubic(t / seconds))
+
+        clip = clip.with_position(lambda t: (left, top + offset(t)))
+    else:
+        clip = clip.with_position((left, top))
+
+    # Fade is part of every animation: appearing hard while moving looks like
+    # a glitch rather than an effect.
+    try:
+        clip = clip.with_effects([vfx.CrossFadeIn(seconds * _FADE_SHARE.get(kind, 1.0))])
+    except Exception:
+        pass
+    return clip
+
+
+def _wrap_free(draw, words, font, stroke_width, max_width):
+    """Greedy wrap with no line limit - used by titles, which must simply fit."""
+    lines, current = [], []
+    for word in words:
+        trial = current + [word]
+        if _line_width(draw, trial, font, stroke_width, 0) <= max_width or not current:
+            current = trial
+            continue
+        carry = []
+        while len(current) > 1 and _is_hanging(current[-1]):
+            candidate = [current[-1]] + carry + [word]
+            if _line_width(draw, candidate, font, stroke_width, 0) > max_width:
+                break
+            carry.insert(0, current.pop())
+        lines.append(current)
+        current = carry + [word]
+    if current:
+        lines.append(current)
+    return lines
+
+
+def render_title_image(video_w, video_h, text, style):
+    """Static title text, wrapped and shrunk until it fits the block."""
+    merged = copy.deepcopy(TITLE_STYLE)
+    if style:
+        merged.update({k: v for k, v in style.items() if v is not None})
+    style = merged
+
+    text = " ".join(str(text).split())
+    if not text:
+        return None
+
+    font_path = _resolve_font_path(style)
+    if not _font_covers(_get_font(font_path, 32), text):
+        for candidate in FALLBACK_FONTS:
+            candidate_path = _resolve_font_path(candidate)
+            if os.path.exists(candidate_path.partition("#")[0]) \
+                    and _font_covers(_get_font(candidate_path, 32), text):
+                font_path = candidate_path
+                break
+
+    draw = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    stroke_width = int(style["stroke_width"])
+    max_width = int(video_w * style["max_width_ratio"])
+    if style["highlight_style"] == "box":
+        max_width = min(max_width, video_w - 2 * (style["box_padding_x"] + 4))
+    max_width = max(64, max_width)
+    # Height budget: the text keeps its distance from the edge it is anchored
+    # to, and must not run past the opposite one. A title that would need more
+    # room is shrunk, never cropped.
+    margin = _effective_position_margin(style, video_h)
+    if style["position"] == "center":
+        room = video_h - 2 * margin
+    else:
+        room = video_h - margin - int(video_h * 0.08)
+    # A title stays a title: never past the free space, and never more than
+    # about a third of the frame. Longer text is shrunk, never cropped.
+    max_height = max(int(video_h * 0.22), min(room, int(video_h * 0.38)))
+
+    words = text.split()
+    size = max(10, int(style["font_size"]))
+    for _ in range(60):   # shrink until the block fits both ways
+        font = _get_font(font_path, size)
+        lines = _wrap_free(draw, words, font, stroke_width, max_width)
+        widest = max(_line_width(draw, line, font, stroke_width, 0) for line in lines)
+        ascent, descent = font.getmetrics()
+        line_height = int((ascent + descent) * style["line_spacing"])
+        if (widest <= max_width and line_height * len(lines) <= max_height) or size <= 10:
+            break
+        size = max(10, int(size * 0.92))
+
+    scale = size / max(1, int(style["font_size"]))
+    pad_x = style["box_padding_x"] * scale
+    pad_y = style["box_padding_y"] * scale
+    radius = style["box_radius"] * scale
+
+    block_height = line_height * len(lines)
+    if style["position"] == "top":
+        block_top = margin
+    elif style["position"] == "bottom":
+        block_top = video_h - margin - block_height
+    else:
+        block_top = video_h // 2 - block_height // 2
+    block_top = max(0, min(block_top, video_h - block_height))
+
+    canvas = Image.new("RGBA", (video_w, video_h), (0, 0, 0, 0))
+    laid_out = []
+    for index, line_words in enumerate(lines):
+        line_text = " ".join(line_words)
+        width, _ = _measure(draw, line_text, font, stroke_width)
+        laid_out.append((line_text, (video_w - width) // 2, block_top + index * line_height, width))
+
+    for shadow_rgba, blur, (ox, oy) in _shadow_layers(style):
+        layer = Image.new("RGBA", (video_w, video_h), (0, 0, 0, 0))
+        layer_draw = ImageDraw.Draw(layer)
+        for line_text, x, y, _w in laid_out:
+            layer_draw.text((x + ox, y + oy), line_text, font=font, fill=shadow_rgba)
+        if blur > 0:
+            layer = layer.filter(ImageFilter.GaussianBlur(blur))
+        canvas = Image.alpha_composite(canvas, layer)
+
+    painter = ImageDraw.Draw(canvas)
+    if style["highlight_style"] == "box":
+        # Static version of the word pill: one plate behind each line.
+        box_rgba = _hex_to_rgba(style["box_color"], style["box_opacity"])
+        cap_top, baseline = _cap_band(painter, font, stroke_width)
+        for line_text, x, y, width in laid_out:
+            bbox = _text_bbox(painter, line_text, font, stroke_width)
+            top = y + cap_top - pad_y
+            bottom = y + max(baseline + pad_y, bbox[3] + pad_y * 0.4)
+            painter.rounded_rectangle(
+                [max(0, x - pad_x), max(0, top),
+                 min(video_w, x + width + pad_x), min(video_h, bottom)],
+                radius=radius, fill=box_rgba,
+            )
+
+    if style["highlight_style"] == "box":
+        fill = _hex_to_rgba(style.get("active_text_color", style["text_color"]))
+    elif style["highlight_style"] == "color":
+        fill = _hex_to_rgba(style.get("word_highlight_color", style["text_color"]))
+    else:
+        fill = _hex_to_rgba(style["text_color"])
+    kwargs = {"fill": fill}
+    if stroke_width > 0:
+        kwargs["stroke_width"] = stroke_width
+        kwargs["stroke_fill"] = _hex_to_rgba(style["stroke_color"])
+    for line_text, x, y, _w in laid_out:
+        painter.text((x, y), line_text, font=font, **kwargs)
+
+    return canvas
+
+
+def _title_phase(style, phase):
+    """(kind, seconds) for "in" or "out" of one title, or (None, 0)."""
+    if not style.get(f"anim_{phase}_enabled"):
+        return None, 0.0
+    kind = str(style.get(f"anim_{phase}_kind") or "fade").lower()
+    if kind not in TITLE_ANIMATIONS:
+        return None, 0.0
+    try:
+        seconds = max(0.0, float(style.get(f"anim_{phase}_ms", 0) or 0)) / 1000.0
+    except (TypeError, ValueError):
+        seconds = 0.0
+    return (kind, seconds) if seconds > 0 else (None, 0.0)
+
+
+def _slide_offset(kind, left, top, width, height, video_w, video_h):
+    """Where the title sits before it arrives (or after it leaves), in pixels
+    relative to its place: just outside the frame on the named side."""
+    if kind == "slide_left":
+        return -(left + width), 0.0
+    if kind == "slide_right":
+        return video_w - left, 0.0
+    if kind == "slide_up":
+        return 0.0, -(top + height)
+    if kind == "slide_down":
+        return 0.0, video_h - top
+    return 0.0, 0.0
+
+
+def _blur_phase_clips(crop, left, top, start, duration, arriving, steps=_BLUR_STEPS):
+    """A title melting out of (or into) a blur, as a short stack of stills.
+
+    Blurring every frame on the fly would cost a Gaussian per frame; a handful
+    of pre-blurred stills reads the same at these lengths.
+    """
+    import numpy as np
+
+    width, height = crop.size
+    radius = max(6.0, height * 0.18)
+    pad = int(math.ceil(radius * 2.5))
+    padded = Image.new("RGBA", (width + 2 * pad, height + 2 * pad), (0, 0, 0, 0))
+    padded.paste(crop, (pad, pad))
+
+    clips = []
+    step = duration / steps
+    for index in range(steps):
+        share = (index + 0.5) / steps
+        progress = share if arriving else 1.0 - share
+        frame = padded.filter(ImageFilter.GaussianBlur(radius * (1.0 - progress)))
+        alpha = frame.getchannel("A").point(lambda value, p=progress: int(value * p))
+        frame.putalpha(alpha)
+        clip = ImageClip(np.array(frame), transparent=True)
+        clips.append(clip.with_start(start + index * step)
+                         .with_duration(step)
+                         .with_position((left - pad, top - pad)))
+    return clips
+
+
+def _title_clips_for(image, start, duration, video_w, video_h, anim_in, anim_out):
+    """One title on screen: arrival, the still middle, and departure."""
+    import numpy as np
+
+    bbox = image.getbbox()
+    if not bbox or duration <= 0:
+        return []
+    left, top, right, bottom = bbox
+    width, height = right - left, bottom - top
+    crop = image.crop(bbox)
+
+    in_kind, in_seconds = anim_in
+    out_kind, out_seconds = anim_out
+    # Neither half may eat the other: a 1 s title cannot fade in for 2 s.
+    in_seconds = min(in_seconds, duration / 2.0) if in_kind else 0.0
+    out_seconds = min(out_seconds, duration / 2.0) if out_kind else 0.0
+
+    clips = []
+    body_start, body_end = start, start + duration
+    if in_kind == "blur":
+        clips.extend(_blur_phase_clips(crop, left, top, start, in_seconds, True))
+        body_start = start + in_seconds
+    if out_kind == "blur":
+        clips.extend(_blur_phase_clips(
+            crop, left, top, start + duration - out_seconds, out_seconds, False))
+        body_end = start + duration - out_seconds
+
+    body = ImageClip(np.array(crop), transparent=True)
+    body = body.with_start(body_start).with_duration(max(0.01, body_end - body_start))
+    offset_into_title = body_start - start
+
+    moving_in = in_kind and in_kind != "blur" and in_seconds > 0
+    moving_out = out_kind and out_kind != "blur" and out_seconds > 0
+    in_shift = _slide_offset(in_kind, left, top, width, height, video_w, video_h) if moving_in else (0.0, 0.0)
+    out_shift = _slide_offset(out_kind, left, top, width, height, video_w, video_h) if moving_out else (0.0, 0.0)
+
+    def phases(t):
+        """(arrival progress, departure progress) at clip time t, 0..1 each."""
+        elapsed = offset_into_title + t
+        arrive = _ease_out_cubic(min(1.0, elapsed / in_seconds)) if moving_in else 1.0
+        left_over = duration - elapsed
+        depart = _ease_out_cubic(min(1.0, left_over / out_seconds)) if moving_out else 1.0
+        return arrive, depart
+
+    def scale(t):
+        arrive, depart = phases(t)
+        value = 1.0
+        if in_kind == "zoom":
+            value *= 0.6 + 0.4 * arrive
+        if out_kind == "zoom":
+            value *= 0.6 + 0.4 * depart
+        return value
+
+    def position(t):
+        arrive, depart = phases(t)
+        x, y = float(left), float(top)
+        x += in_shift[0] * (1.0 - arrive) + out_shift[0] * (1.0 - depart)
+        y += in_shift[1] * (1.0 - arrive) + out_shift[1] * (1.0 - depart)
+        if in_kind == "zoom" or out_kind == "zoom":
+            factor = scale(t)
+            x = left + width / 2.0 - width * factor / 2.0 + (x - left)
+            y = top + height / 2.0 - height * factor / 2.0 + (y - top)
+        return x, y
+
+    if in_kind == "zoom" or out_kind == "zoom":
+        body = body.resized(scale)
+    body = body.with_position(position if (moving_in or moving_out) else (left, top))
+
+    # Fading belongs to every kind: sliding or zooming in at full opacity
+    # looks like a jump cut.
+    try:
+        effects = []
+        if moving_in:
+            effects.append(vfx.CrossFadeIn(in_seconds))
+        if moving_out:
+            effects.append(vfx.CrossFadeOut(out_seconds))
+        if effects:
+            body = body.with_effects(effects)
+    except Exception:
+        pass
+
+    clips.append(body)
+    return clips
+
+
+def title_style_for(style, index):
+    """The style of title N: its own, the shared one, or the defaults."""
+    styles = (style or {}).get("title_styles")
+    chosen = None
+    if isinstance(styles, (list, tuple)) and styles:
+        chosen = styles[index] if index < len(styles) else styles[0]
+    if not chosen:
+        chosen = (style or {}).get("title_style")
+    merged = copy.deepcopy(TITLE_STYLE)
+    if chosen:
+        merged.update({k: v for k, v in chosen.items() if v is not None})
+    return merged
+
+
+def title_clips(video_w, video_h, video_duration, overlays, style):
+    """Clips for the manual titles. Each title carries its own style, so two
+    of them can sit on screen at once, in different places and colours."""
+    clips = []
+    for index, overlay in enumerate(overlays or []):
+        text = str((overlay or {}).get("text") or "").strip()
+        if not text:
+            continue
+        try:
+            start = max(0.0, float(overlay.get("start") or 0))
+            end = float(overlay.get("end") or 0)
+        except (TypeError, ValueError):
+            continue
+        if video_duration:
+            end = min(end, float(video_duration))
+        if end <= start:
+            continue
+        title_style = title_style_for(style, index)
+        image = render_title_image(video_w, video_h, text, title_style)
+        if image is None:
+            continue
+        clips.extend(_title_clips_for(
+            image, start, end - start, video_w, video_h,
+            _title_phase(title_style, "in"), _title_phase(title_style, "out"),
+        ))
+    return clips
+
+
 class _ProgressLogger(proglog.ProgressBarLogger):
     def __init__(self, cb):
         super().__init__()
@@ -436,7 +894,7 @@ class _ProgressLogger(proglog.ProgressBarLogger):
         if total:
             self._cb("rendering", int(100 * value / max(total, 1)))
 
-def render_captions(video_path, segments, output_path, style=None, progress_cb=None):
+def render_captions(video_path, segments, output_path, style=None, progress_cb=None, overlays=None):
     merged_style = copy.deepcopy(DEFAULT_STYLE)
     if style:
         merged_style.update(style)
@@ -486,7 +944,9 @@ def render_captions(video_path, segments, output_path, style=None, progress_cb=N
         sentence_breaks=mode == "sentences", one_word=mode == "words",
     )
 
+    animation = _animation_for(style)
     clips = [video]
+    clips.extend(title_clips(video.w, video.h, video.duration, overlays, style))
     total_words = sum(len(c["words"]) for c in captions)
     done_words = 0
 
@@ -528,10 +988,15 @@ def render_captions(video_path, segments, output_path, style=None, progress_cb=N
 
             frame_img = _render_state_image(video.w, video.h, lines, active_line_idx, active_word_idx, chunk_font, chunk_style, max_width)
 
-            import numpy as np
-            img_clip = ImageClip(np.array(frame_img), transparent=True)
-            img_clip = img_clip.with_start(start).with_duration(end - start).with_position((0, 0))
-            clips.append(img_clip)
+            # Only the first image of a caption is an arrival; the images after
+            # it just move the highlight, and animating those would make the
+            # whole line twitch on every word.
+            img_clip = _image_clip(
+                frame_img, start, end - start,
+                animation if i == 0 else (None, 0.0),
+            )
+            if img_clip is not None:
+                clips.append(img_clip)
 
             done_words += 1
             if progress_cb and total_words:

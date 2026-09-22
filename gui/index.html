@@ -82,6 +82,44 @@ body{
 }
 .creator-link:hover{ color:var(--text); background:var(--panel-2); }
 .creator-link:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+.app-version{ color:var(--text-dim); font-size:11px; margin-left:6px; font-variant-numeric:tabular-nums; }
+.cache-badge{ font:inherit; font-size:12px; cursor:pointer; }
+.cache-badge:hover{ border-color:var(--border-hover); color:var(--text); }
+
+/* ---------- titles (manual text over the video) ---------- */
+.titles-block{ border:1px solid var(--border); border-radius:10px; padding:8px 9px; margin-bottom:10px; background:var(--panel); }
+.titles-head{ display:flex; align-items:baseline; gap:8px; margin-bottom:7px; }
+.titles-head b{ font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-dim); }
+.titles-head .hint{ font-size:11px; color:var(--text-dim); opacity:.8; }
+.title-row{ display:grid; grid-template-columns:minmax(0,1fr) 66px 66px; gap:6px; align-items:center; }
+.title-row + .title-row{ margin-top:5px; }
+.title-row input{ width:100%; min-width:0; background:var(--panel-2); border:1px solid var(--border); color:var(--text); border-radius:8px; padding:7px 8px; font:inherit; font-size:13px; }
+.title-row input:focus{ border-color:var(--accent); outline:none; }
+.title-row .title-time{ padding:7px 5px; font-size:12px; font-variant-numeric:tabular-nums; text-align:center; }
+.title-row .title-time::-webkit-inner-spin-button{ display:none; }
+.title-row.bad .title-time{ border-color:var(--danger); color:#ff8792; }
+
+/* ---------- rollouts in the style column ---------- */
+.rollout{ border:1px solid var(--border); border-radius:12px; margin-bottom:10px; background:var(--panel); }
+.rollout > summary{
+  cursor:pointer; list-style:none; padding:10px 12px; font-size:12px; font-weight:700;
+  text-transform:uppercase; letter-spacing:.06em; color:var(--text-dim);
+  display:flex; align-items:center; gap:8px;
+}
+.rollout > summary::-webkit-details-marker{ display:none; }
+.rollout > summary::before{ content:"▸"; font-size:10px; transition:.15s; }
+.rollout[open] > summary{ color:var(--text); border-bottom:1px solid var(--border); }
+.rollout[open] > summary::before{ transform:rotate(90deg); }
+.rollout > summary:hover{ color:var(--text); }
+.rollout-body{ padding:12px; }
+.rollout-body .section:last-child{ margin-bottom:0; }
+
+/* the title caption drawn over the preview frame */
+.title-line{
+  position:absolute; z-index:5; left:50%; transform:translateX(-50%);
+  text-align:center; line-height:1.15; pointer-events:none;
+  -webkit-box-decoration-break:clone; box-decoration-break:clone;
+}
 .spacer{ flex:1; }
 .gpu-badge{
   display:flex; align-items:center; gap:8px;
@@ -489,17 +527,33 @@ input[type=color]::-webkit-color-swatch{ border-radius:6px; border:none; }
 
   <div class="header">
     <div>
-      <div class="logo">AISubs</div>
+      <div class="logo">AISubs<span class="app-version" id="appVersion"></span></div>
     </div>
     <div class="logo-sub">локальные субтитры с подсветкой слов</div>
     <button
       class="creator-link"
       id="creatorChannel"
       type="button"
-      aria-label="Открыть канал проекта в Telegram"
+      aria-label="Открыть канал автора исходного проекта в Telegram"
       onclick="openCreatorChannel()"
     >@daipotestit ↗</button>
+    <button
+      class="creator-link"
+      id="forkChannel"
+      type="button"
+      aria-label="Открыть Telegram автора этой версии"
+      onclick="openProjectLink('fork_author')"
+    >@rinatmaksutov ↗</button>
+    <button
+      class="creator-link"
+      id="repoLink"
+      type="button"
+      aria-label="Открыть репозиторий проекта на GitHub"
+      onclick="openProjectLink('repo')"
+    >Check updates ↗</button>
     <div class="spacer"></div>
+    <button class="gpu-badge cache-badge" id="cacheBadge" type="button"
+            title="Открыть папку кэша" onclick="openCacheFolder()">Кэш —</button>
     <div class="gpu-badge"><span class="dot" id="gpuDot"></span><span id="gpuLabel">определение GPU...</span></div>
   </div>
 
@@ -564,6 +618,8 @@ input[type=color]::-webkit-color-swatch{ border-radius:6px; border:none; }
           <div class="preview-empty">Добавьте видео — здесь будет кадр<br>с субтитрами в выбранном стиле</div>
           <div class="safe-zone-layer" id="safeZoneLayer" aria-hidden="true"></div>
           <div class="text-box" id="textBox"><span class="text-box-size" id="textBoxSize"></span></div>
+          <div class="title-line" id="titleLine0"></div>
+          <div class="title-line" id="titleLine1"></div>
           <div class="preview-line" id="previewLine"></div>
         </div>
       </div>
@@ -610,6 +666,22 @@ input[type=color]::-webkit-color-swatch{ border-radius:6px; border:none; }
         <button class="btn empty-action hidden" type="button" id="editorEmptyAction"></button>
       </div>
       <div class="editor-body hidden" id="editorBody">
+        <div class="titles-block" id="titlesBlock">
+          <div class="titles-head">
+            <b>Заголовки</b>
+            <span class="hint">текст поверх видео · двойной клик по времени — взять с плеера</span>
+          </div>
+          <div class="title-row" data-index="0">
+            <input type="text" class="title-text" placeholder="Заголовок 1 — например, тема ролика" aria-label="Текст заголовка 1">
+            <input type="number" class="title-time" data-field="start" step="0.1" min="0" value="0" aria-label="Начало заголовка 1, секунды">
+            <input type="number" class="title-time" data-field="end" step="0.1" min="0" value="0" aria-label="Конец заголовка 1, секунды">
+          </div>
+          <div class="title-row" data-index="1">
+            <input type="text" class="title-text" placeholder="Заголовок 2 — появится позже" aria-label="Текст заголовка 2">
+            <input type="number" class="title-time" data-field="start" step="0.1" min="0" value="0" aria-label="Начало заголовка 2, секунды">
+            <input type="number" class="title-time" data-field="end" step="0.1" min="0" value="0" aria-label="Конец заголовка 2, секунды">
+          </div>
+        </div>
         <div id="editorAttention" class="attention-box hidden"></div>
         <div class="word-head" aria-hidden="true"><span>Слово</span><span>Начало, с</span><span>Конец, с</span><span></span><span></span></div>
         <div class="word-list" id="wordList"></div>
@@ -624,166 +696,196 @@ input[type=color]::-webkit-color-swatch{ border-radius:6px; border:none; }
     <!-- RIGHT: style editor -->
     <div class="col">
       <h3>Настройки стиля</h3>
+      <details class="rollout" open>
+        <summary>Субтитры</summary>
+        <div class="rollout-body">
 
-      <div class="section">
-        <label>Шрифт <span class="font-count" id="fontCount"></span></label>
-        <input type="text" id="fontSearch" placeholder="поиск по названию…" style="margin-bottom:6px;">
-        <select id="s_font"></select>
-        <div class="switch-row" style="margin-top:8px;">
-          <label>Только с кириллицей</label>
-          <label class="switch"><input type="checkbox" id="fontCyrillicOnly" checked><span class="slider-toggle"></span></label>
-        </div>
-        <div class="field-hint">Для русского текста берите шрифт из первой группы — иначе движок подставит запасной.</div>
-
-        <label>Размер шрифта <span class="range-val" id="v_font_size">84</span></label>
-        <input type="range" id="s_font_size" min="30" max="160" value="84">
-
-        <label>Регистр</label>
-        <div class="toggle-group" id="textCaseGroup">
-          <button data-val="upper" class="active">ЗАГЛАВНЫЕ</button>
-          <button data-val="lower">строчные</button>
-          <button data-val="none">Как есть</button>
-        </div>
-        <label>Разбивка текста</label>
-        <div class="toggle-group" id="captionModeGroup">
-          <button data-val="phrases" class="active">Фразы</button>
-          <button data-val="sentences">Предложения</button>
-          <button data-val="words">По слову</button>
-        </div>
-        <div class="field-hint" id="captionModeHint"></div>
-
-        <label>Цвет текста</label>
-        <div class="color-row">
-          <input type="color" id="s_text_color" value="#ffffff">
-          <input type="text" id="s_text_color_hex" value="#FFFFFF">
-        </div>
-      </div>
-
-      <div class="section">
-        <label>Обводка <span class="range-val" id="v_stroke_width">0</span></label>
-        <input type="range" id="s_stroke_width" min="0" max="10" value="0">
-        <div class="color-row" style="margin-top:8px;">
-          <input type="color" id="s_stroke_color" value="#000000">
-          <input type="text" id="s_stroke_color_hex" value="#000000">
-        </div>
-
-        <div class="switch-row">
-          <label>Тень</label>
-          <label class="switch"><input type="checkbox" id="s_shadow_enabled" checked><span class="slider-toggle"></span></label>
-        </div>
-        <div id="shadowParams">
-        <div class="row">
-          <div>
-            <label>Размытие <span class="range-val" id="v_shadow_blur">6</span></label>
-            <input type="range" id="s_shadow_blur" min="0" max="20" value="6">
+        <div class="section">
+          <label>Шрифт <span class="font-count" id="fontCount"></span></label>
+          <input type="text" id="fontSearch" placeholder="поиск по названию…" style="margin-bottom:6px;">
+          <select id="s_font"></select>
+          <div class="switch-row" style="margin-top:8px;">
+            <label>Только с кириллицей</label>
+            <label class="switch"><input type="checkbox" id="fontCyrillicOnly" checked><span class="slider-toggle"></span></label>
           </div>
-          <div>
-            <label>Прозрачность <span class="range-val" id="v_shadow_opacity">45</span></label>
-            <input type="range" id="s_shadow_opacity" min="0" max="100" value="45">
+          <div class="field-hint">Для русского текста берите шрифт из первой группы — иначе движок подставит запасной.</div>
+
+          <label>Размер шрифта <span class="range-val" id="v_font_size">84</span></label>
+          <input type="range" id="s_font_size" min="30" max="160" value="84">
+
+          <label>Регистр</label>
+          <div class="toggle-group" id="textCaseGroup">
+            <button data-val="upper" class="active">ЗАГЛАВНЫЕ</button>
+            <button data-val="lower">строчные</button>
+            <button data-val="none">Как есть</button>
+          </div>
+          <label>Разбивка текста</label>
+          <div class="toggle-group" id="captionModeGroup">
+            <button data-val="phrases" class="active">Фразы</button>
+            <button data-val="sentences">Предложения</button>
+            <button data-val="words">По слову</button>
+          </div>
+          <div class="field-hint" id="captionModeHint"></div>
+
+          <label>Цвет текста</label>
+          <div class="color-row">
+            <input type="color" id="s_text_color" value="#ffffff">
+            <input type="text" id="s_text_color_hex" value="#FFFFFF">
           </div>
         </div>
-        <div class="row">
-          <div>
-            <label>Offset X <span class="range-val" id="v_shadow_offset_x">0</span></label>
-            <input type="range" id="s_shadow_offset_x" min="-40" max="40" value="0">
-          </div>
-          <div>
-            <label>Offset Y <span class="range-val" id="v_shadow_offset_y">3</span></label>
-            <input type="range" id="s_shadow_offset_y" min="-40" max="40" value="3">
-          </div>
-        </div>
-        </div>
 
-        <div class="switch-row">
-          <label>Тень 2</label>
-          <label class="switch"><input type="checkbox" id="s_shadow2_enabled"><span class="slider-toggle"></span></label>
-        </div>
-        <div id="shadow2Params">
+        <div class="section">
+          <label>Обводка <span class="range-val" id="v_stroke_width">0</span></label>
+          <input type="range" id="s_stroke_width" min="0" max="10" value="0">
+          <div class="color-row" style="margin-top:8px;">
+            <input type="color" id="s_stroke_color" value="#000000">
+            <input type="text" id="s_stroke_color_hex" value="#000000">
+          </div>
+
+          <div class="switch-row">
+            <label>Тень</label>
+            <label class="switch"><input type="checkbox" id="s_shadow_enabled" checked><span class="slider-toggle"></span></label>
+          </div>
+          <div id="shadowParams">
           <div class="row">
             <div>
-              <label>Размытие <span class="range-val" id="v_shadow2_blur">18</span></label>
-              <input type="range" id="s_shadow2_blur" min="0" max="40" value="18">
+              <label>Размытие <span class="range-val" id="v_shadow_blur">6</span></label>
+              <input type="range" id="s_shadow_blur" min="0" max="20" value="6">
             </div>
             <div>
-              <label>Прозрачность <span class="range-val" id="v_shadow2_opacity">35</span></label>
-              <input type="range" id="s_shadow2_opacity" min="0" max="100" value="35">
+              <label>Прозрачность <span class="range-val" id="v_shadow_opacity">45</span></label>
+              <input type="range" id="s_shadow_opacity" min="0" max="100" value="45">
             </div>
           </div>
           <div class="row">
             <div>
-              <label>Offset X <span class="range-val" id="v_shadow2_offset_x">0</span></label>
-              <input type="range" id="s_shadow2_offset_x" min="-40" max="40" value="0">
+              <label>Offset X <span class="range-val" id="v_shadow_offset_x">0</span></label>
+              <input type="range" id="s_shadow_offset_x" min="-40" max="40" value="0">
             </div>
             <div>
-              <label>Offset Y <span class="range-val" id="v_shadow2_offset_y">10</span></label>
-              <input type="range" id="s_shadow2_offset_y" min="-40" max="40" value="10">
+              <label>Offset Y <span class="range-val" id="v_shadow_offset_y">3</span></label>
+              <input type="range" id="s_shadow_offset_y" min="-40" max="40" value="3">
             </div>
           </div>
-        </div>
-      </div>
-
-      <div class="section">
-        <label>Тип выделения слова</label>
-        <div class="toggle-group" id="highlightStyleGroup">
-          <button data-val="box" class="active">Плашка</button>
-          <button data-val="color">Цвет</button>
-          <button data-val="none">Без</button>
-        </div>
-
-        <div id="boxParams">
-          <label>Цвет плашки</label>
-          <div class="color-row">
-            <input type="color" id="s_box_color" value="#3fa9e8">
-            <input type="text" id="s_box_color_hex" value="#3FA9E8">
           </div>
-          <label>Цвет текста на плашке</label>
-          <div class="color-row">
-            <input type="color" id="s_active_text_color" value="#ffffff">
-            <input type="text" id="s_active_text_color_hex" value="#FFFFFF">
+
+          <div class="switch-row">
+            <label>Тень 2</label>
+            <label class="switch"><input type="checkbox" id="s_shadow2_enabled"><span class="slider-toggle"></span></label>
           </div>
-          <label>Скругление <span class="range-val" id="v_box_radius">16</span></label>
-          <input type="range" id="s_box_radius" min="0" max="50" value="16">
-          <div class="row">
-            <div>
-              <label>Отступ X <span class="range-val" id="v_box_padding_x">20</span></label>
-              <input type="range" id="s_box_padding_x" min="0" max="40" value="20">
+          <div id="shadow2Params">
+            <div class="row">
+              <div>
+                <label>Размытие <span class="range-val" id="v_shadow2_blur">18</span></label>
+                <input type="range" id="s_shadow2_blur" min="0" max="40" value="18">
+              </div>
+              <div>
+                <label>Прозрачность <span class="range-val" id="v_shadow2_opacity">35</span></label>
+                <input type="range" id="s_shadow2_opacity" min="0" max="100" value="35">
+              </div>
             </div>
-            <div>
-              <label>Отступ Y <span class="range-val" id="v_box_padding_y">10</span></label>
-              <input type="range" id="s_box_padding_y" min="0" max="30" value="10">
+            <div class="row">
+              <div>
+                <label>Offset X <span class="range-val" id="v_shadow2_offset_x">0</span></label>
+                <input type="range" id="s_shadow2_offset_x" min="-40" max="40" value="0">
+              </div>
+              <div>
+                <label>Offset Y <span class="range-val" id="v_shadow2_offset_y">10</span></label>
+                <input type="range" id="s_shadow2_offset_y" min="-40" max="40" value="10">
+              </div>
             </div>
           </div>
         </div>
 
-        <div id="colorParams" class="hidden">
-          <label>Цвет активного слова</label>
-          <div class="color-row">
-            <input type="color" id="s_word_highlight_color" value="#ffd400">
-            <input type="text" id="s_word_highlight_color_hex" value="#FFD400">
+        <div class="section">
+          <label>Тип выделения слова</label>
+          <div class="toggle-group" id="highlightStyleGroup">
+            <button data-val="box" class="active">Плашка</button>
+            <button data-val="color">Цвет</button>
+            <button data-val="none">Без</button>
+          </div>
+
+          <div id="boxParams">
+            <label>Цвет плашки</label>
+            <div class="color-row">
+              <input type="color" id="s_box_color" value="#3fa9e8">
+              <input type="text" id="s_box_color_hex" value="#3FA9E8">
+            </div>
+            <label>Цвет текста на плашке</label>
+            <div class="color-row">
+              <input type="color" id="s_active_text_color" value="#ffffff">
+              <input type="text" id="s_active_text_color_hex" value="#FFFFFF">
+            </div>
+            <label>Скругление <span class="range-val" id="v_box_radius">16</span></label>
+            <input type="range" id="s_box_radius" min="0" max="50" value="16">
+            <div class="row">
+              <div>
+                <label>Отступ X <span class="range-val" id="v_box_padding_x">20</span></label>
+                <input type="range" id="s_box_padding_x" min="0" max="40" value="20">
+              </div>
+              <div>
+                <label>Отступ Y <span class="range-val" id="v_box_padding_y">10</span></label>
+                <input type="range" id="s_box_padding_y" min="0" max="30" value="10">
+              </div>
+            </div>
+          </div>
+
+          <div id="colorParams" class="hidden">
+            <label>Цвет активного слова</label>
+            <div class="color-row">
+              <input type="color" id="s_word_highlight_color" value="#ffd400">
+              <input type="text" id="s_word_highlight_color_hex" value="#FFD400">
+            </div>
           </div>
         </div>
-      </div>
 
-      <div class="section">
-        <label>Позиция</label>
-        <div class="toggle-group" id="positionGroup">
-          <button data-val="top">Верх</button>
-          <button data-val="center">Центр</button>
-          <button data-val="bottom" class="active">Низ</button>
+        <div class="section">
+          <label>Позиция</label>
+          <div class="toggle-group" id="positionGroup">
+            <button data-val="top">Верх</button>
+            <button data-val="center">Центр</button>
+            <button data-val="bottom" class="active">Низ</button>
+          </div>
+          <div class="position-margin-head">
+            <label for="s_position_margin">Отступ от края <span class="range-val" id="v_position_margin">190</span></label>
+            <button class="safe-zone-snap" id="snapSafeZoneMargin" type="button" aria-pressed="false" aria-describedby="safeZoneSnapHint" disabled>По зоне</button>
+          </div>
+          <input type="range" id="s_position_margin" min="20" max="960" value="190">
+          <div class="field-hint safe-zone-snap-hint" id="safeZoneSnapHint" role="status" aria-live="polite">Включите безопасную зону под предпросмотром</div>
+
+          <label>Строк максимум <span class="range-val" id="v_line_count">1</span></label>
+          <input type="range" id="s_line_count" min="1" max="4" value="1">
+
+          <label>Ширина блока <span class="range-val" id="v_max_width_ratio">86</span></label>
+          <input type="range" id="s_max_width_ratio" min="40" max="100" value="86">
         </div>
-        <div class="position-margin-head">
-          <label for="s_position_margin">Отступ от края <span class="range-val" id="v_position_margin">190</span></label>
-          <button class="safe-zone-snap" id="snapSafeZoneMargin" type="button" aria-pressed="false" aria-describedby="safeZoneSnapHint" disabled>По зоне</button>
         </div>
-        <input type="range" id="s_position_margin" min="20" max="960" value="190">
-        <div class="field-hint safe-zone-snap-hint" id="safeZoneSnapHint" role="status" aria-live="polite">Включите безопасную зону под предпросмотром</div>
+      </details>
 
-        <label>Строк максимум <span class="range-val" id="v_line_count">1</span></label>
-        <input type="range" id="s_line_count" min="1" max="4" value="1">
+      <details class="rollout">
+        <summary>Анимация появления</summary>
+        <div class="rollout-body">
+          <div class="toggle-group" id="wordAnimationGroup">
+            <button data-val="none" class="active">Нет</button>
+            <button data-val="fade">Плавно</button>
+            <button data-val="pop">Подскок</button>
+            <button data-val="rise">Снизу</button>
+          </div>
+          <div class="field-hint">Так появляется каждая новая реплика. В режиме «По слову» — каждое слово.</div>
+          <label>Длительность, мс <span class="range-val" id="v_word_animation_ms">220</span></label>
+          <input type="range" id="s_word_animation_ms" min="80" max="600" step="10" value="220">
+        </div>
+      </details>
 
-        <label>Ширина блока <span class="range-val" id="v_max_width_ratio">86</span></label>
-        <input type="range" id="s_max_width_ratio" min="40" max="100" value="86">
-      </div>
+      <details class="rollout" id="titleRollout0">
+        <summary>Заголовок 1</summary>
+        <div class="rollout-body" id="titlePanel0"></div>
+      </details>
+
+      <details class="rollout" id="titleRollout1">
+        <summary>Заголовок 2</summary>
+        <div class="rollout-body" id="titlePanel1"></div>
+      </details>
     </div>
 
   </div>

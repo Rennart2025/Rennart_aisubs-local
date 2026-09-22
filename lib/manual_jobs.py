@@ -105,6 +105,7 @@ class ManualJobService:
             "error": None,
             "revision": None,
             "output": None,
+            "overlays": [],
         }
 
     def create_job(self, videos, params, initial_state="queued"):
@@ -278,6 +279,27 @@ class ManualJobService:
         self._item(item_id)
         return self.store.latest(item_id)
 
+    def set_overlays(self, item_id, overlays):
+        """Manual titles for one file: [{text, start, end}, ...]."""
+        job, item = self._item(item_id)
+        if item["state"] in ACTIVE:
+            raise ManualJobError("файл сейчас обрабатывается")
+        cleaned = []
+        for overlay in overlays or []:
+            try:
+                start = max(0.0, float((overlay or {}).get("start") or 0))
+                end = max(0.0, float((overlay or {}).get("end") or 0))
+            except (TypeError, ValueError):
+                start = end = 0.0
+            cleaned.append({"text": str((overlay or {}).get("text") or ""),
+                            "start": start, "end": end})
+        item["overlays"] = cleaned
+        # A title change is a change to the output, like editing the text.
+        if item["state"] == "completed" and item.get("revision"):
+            item.update(state="needs_review", stage="needs_review")
+        self._emit(job, item)
+        return self._snapshot_unlocked(job)
+
     def apply_patch(self, item_id, base_revision, operations):
         job, item = self._item(item_id)
         if item["state"] in ACTIVE:
@@ -338,7 +360,8 @@ class ManualJobService:
                     raise FileNotFoundError("исходный файл не найден: " + item["path"])
                 segments = self.store.render_segments(item["item_id"], item["revision"])
                 result = self.render_fn(
-                    item["path"], output, segments, style=copy.deepcopy(style), progress_cb=progress
+                    item["path"], output, segments, style=copy.deepcopy(style),
+                    progress_cb=progress, overlays=copy.deepcopy(item.get("overlays") or []),
                 )
                 item.update(
                     state="completed", stage="completed", progress=100,

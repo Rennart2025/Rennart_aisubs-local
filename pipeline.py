@@ -72,13 +72,14 @@ def transcribe_phase(
     }
 
 
-def render_phase(video_path, output_path, segments, style=None, progress_cb=None):
+def render_phase(video_path, output_path, segments, style=None, progress_cb=None, overlays=None):
     video_path = os.fspath(video_path)
     output_path = os.fspath(output_path)
     if not segments or not any(segment.get("words") for segment in segments):
         raise ValueError("no speech was detected; video was not rendered")
     renderer_mod.render_captions(
-        video_path, segments, output_path, style=style, progress_cb=progress_cb
+        video_path, segments, output_path, style=style, progress_cb=progress_cb,
+        overlays=overlays,
     )
     return {"output": output_path}
 
