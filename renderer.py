@@ -109,6 +109,9 @@ TITLE_STYLE = {
 
     "position": "center",
     "position_margin": 190,
+    # Horizontal shift from the centre, in source pixels: minus left, plus
+    # right. Clamped at render time so a title never leaves the frame.
+    "offset_x": 0,
 
     # Arrival and departure, set apart: each has a switch, a kind and a length.
     "anim_in_enabled": True,
@@ -652,11 +655,25 @@ def render_title_image(video_w, video_h, text, style):
     block_top = max(0, min(block_top, video_h - block_height))
 
     canvas = Image.new("RGBA", (video_w, video_h), (0, 0, 0, 0))
-    laid_out = []
-    for index, line_words in enumerate(lines):
+    measured = []
+    for line_words in lines:
         line_text = " ".join(line_words)
         width, _ = _measure(draw, line_text, font, stroke_width)
-        laid_out.append((line_text, (video_w - width) // 2, block_top + index * line_height, width))
+        measured.append((line_text, width))
+
+    # One shift for the whole block, so the lines keep their relative centring.
+    # It stops at the frame edge: the widest line (plus its plate) decides how
+    # much room is left, and the canvas is exactly the frame, so anything past
+    # that would be cropped rather than moved.
+    edge = pad_x + stroke_width if style["highlight_style"] == "box" else 0
+    widest = max(width for _text, width in measured)
+    room = max(0, (video_w - widest) // 2 - int(edge))
+    shift = int(max(-room, min(int(style.get("offset_x") or 0), room)))
+
+    laid_out = []
+    for index, (line_text, width) in enumerate(measured):
+        laid_out.append((line_text, (video_w - width) // 2 + shift,
+                         block_top + index * line_height, width))
 
     for shadow_rgba, blur, (ox, oy) in _shadow_layers(style):
         layer = Image.new("RGBA", (video_w, video_h), (0, 0, 0, 0))

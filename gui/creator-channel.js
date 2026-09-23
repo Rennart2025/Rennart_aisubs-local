@@ -22,6 +22,7 @@
     author: "@daipotestit",
     fork_author: "@rinatmaksutov",
     repo: "репозиторий проекта",
+    page: "страницу программы",
   };
 
   // Header links other than the original author's channel. The page sends a

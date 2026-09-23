@@ -50,6 +50,51 @@ class TitleRenderingTests(unittest.TestCase):
         self.assertLess(boxes["center"][1], boxes["bottom"][1])
         self.assertGreaterEqual(boxes["top"][1], 100)
 
+    def test_horizontal_offset_moves_the_block_sideways(self):
+        middle = self.ink_box(renderer.render_title_image(1080, 1920, "Заголовок", self.style()))
+        right = self.ink_box(renderer.render_title_image(
+            1080, 1920, "Заголовок", self.style(offset_x=200)))
+        left = self.ink_box(renderer.render_title_image(
+            1080, 1920, "Заголовок", self.style(offset_x=-200)))
+
+        self.assertAlmostEqual(right[0] - middle[0], 200, delta=2)
+        self.assertAlmostEqual(middle[0] - left[0], 200, delta=2)
+        # Only sideways: the vertical placement is untouched.
+        self.assertEqual(middle[1], right[1])
+
+    def test_the_offset_stops_at_the_frame_edge(self):
+        for offset in (5000, -5000):
+            image = renderer.render_title_image(
+                1080, 1920, "Заголовок", self.style(offset_x=offset))
+            left, _top, right, _bottom = self.ink_box(image)
+
+            self.assertGreaterEqual(left, 0, offset)
+            self.assertLessEqual(right, 1080, offset)
+
+    def test_the_offset_keeps_the_plate_inside_the_frame(self):
+        image = renderer.render_title_image(
+            1080, 1920, "Заголовок",
+            self.style(offset_x=5000, highlight_style="box", box_color="#FF0000",
+                       box_padding_x=40))
+        left, _top, right, _bottom = self.ink_box(image)
+
+        self.assertGreaterEqual(left, 0)
+        self.assertLessEqual(right, 1080)
+
+    def test_line_spacing_changes_the_height_of_a_wrapped_title(self):
+        # A small font in a narrow block: the text wraps, and the height budget
+        # never kicks in, so the spacing alone decides how tall the block is.
+        text = "Заголовок из нескольких слов на две строки"
+        thin = dict(font_size=54, max_width_ratio=0.4)
+        tight = self.ink_box(renderer.render_title_image(
+            1080, 1920, text, self.style(line_spacing=1.0, **thin)))
+        loose = self.ink_box(renderer.render_title_image(
+            1080, 1920, text, self.style(line_spacing=1.8, **thin)))
+
+        self.assertGreater(loose[3] - loose[1], tight[3] - tight[1])
+        # Same words, same font: only the gaps between the lines grew.
+        self.assertAlmostEqual(loose[2] - loose[0], tight[2] - tight[0], delta=2)
+
     def test_empty_text_draws_nothing(self):
         self.assertIsNone(renderer.render_title_image(1080, 1920, "   ", self.style()))
 

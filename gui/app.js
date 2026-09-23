@@ -144,6 +144,7 @@ const DEFAULT_TITLE_STYLE = {
   line_spacing: 1.18,
   position: "center",
   position_margin: 190,
+  offset_x: 0,              // + вправо, − влево, в пикселях исходника
   anim_in_enabled: true,
   anim_in_kind: "fade",
   anim_in_ms: 400,
@@ -199,7 +200,7 @@ function bindRange(id, valId, key, fmt, scope) {
   el.addEventListener("input", () => {
     const raw = parseFloat(el.value);
     styleFor(scope)[key] = fmt ? fmt(raw) : raw;
-    $(valId).textContent = fmt ? Math.round(raw) : raw;
+    $(valId).textContent = fmt ? Math.round(raw) : formatRangeValue(el, raw);
     updatePreview();
     renderSafeZones();
   });
@@ -221,6 +222,20 @@ function bindOffset(id, valId, key, axis, scope) {
 
 function offsetPair(value) {
   return Array.isArray(value) ? [Number(value[0]) || 0, Number(value[1]) || 0] : [0, 0];
+}
+
+// A slider that moves in fractions keeps its decimals on screen, so 1.00 does
+// not read as a different setting than 1.18.
+function formatRangeValue(el, raw) {
+  const step = Number(el && el.step);
+  return step > 0 && step < 1 ? raw.toFixed(2) : raw;
+}
+
+// Presets saved before the slider existed have no line_spacing at all, and a
+// zero here would collapse every line onto one.
+function lineSpacingOf(from) {
+  const value = Number(from && from.line_spacing);
+  return value >= 0.5 && value <= 4 ? value : DEFAULT_STYLE.line_spacing;
 }
 
 function bindColor(colorId, hexId, key, alsoKey, scope) {
@@ -298,6 +313,7 @@ function setupBindings() {
     renderSafeZones();
   });
   bindRange("s_line_count", "v_line_count", "line_count");
+  bindRange("s_line_spacing", "v_line_spacing", "line_spacing");
   bindRange("s_max_width_ratio", "v_max_width_ratio", "max_width_ratio", (v) => v / 100);
 
   setupToggleGroup("highlightStyleGroup", (val) => {
@@ -491,8 +507,15 @@ function titlePanelMarkup(i) {
       <label>Отступ от края <span class="range-val" id="v_t${i}_position_margin">190</span></label>
       <input type="range" id="s_t${i}_position_margin" min="20" max="960" value="190">
 
+      <label>Сдвиг влево / вправо <span class="range-val" id="v_t${i}_offset_x">0</span></label>
+      <input type="range" id="s_t${i}_offset_x" min="-600" max="600" step="10" value="0">
+      <div class="field-hint">0 — по центру кадра, минус влево, плюс вправо. За край кадра заголовок не уедет: сдвиг останавливается у границы.</div>
+
       <label>Ширина блока <span class="range-val" id="v_t${i}_max_width_ratio">86</span></label>
       <input type="range" id="s_t${i}_max_width_ratio" min="40" max="100" value="86">
+
+      <label>Межстрочный интервал <span class="range-val" id="v_t${i}_line_spacing">1.18</span></label>
+      <input type="range" id="s_t${i}_line_spacing" min="0.8" max="2" step="0.02" value="1.18">
     </div>
 
     <div class="section">
@@ -575,7 +598,9 @@ function bindTitlePanel(i) {
 
   setupToggleGroup(`t${i}PositionGroup`, (val) => { target().position = val; updatePreview(); });
   bindRange(`s_t${i}_position_margin`, `v_t${i}_position_margin`, "position_margin", null, scope);
+  bindRange(`s_t${i}_offset_x`, `v_t${i}_offset_x`, "offset_x", null, scope);
   bindRange(`s_t${i}_max_width_ratio`, `v_t${i}_max_width_ratio`, "max_width_ratio", (v) => v / 100, scope);
+  bindRange(`s_t${i}_line_spacing`, `v_t${i}_line_spacing`, "line_spacing", null, scope);
 
   ["in", "out"].forEach((phase) => {
     const block = phase === "in" ? "AnimIn" : "AnimOut";
@@ -643,6 +668,8 @@ function applyStyleToControls() {
   const effectiveMargin = SafeZones.effectiveMargin(style, sourceHeight);
   $("s_position_margin").value = effectiveMargin; $("v_position_margin").textContent = effectiveMargin;
   $("s_line_count").value = style.line_count; $("v_line_count").textContent = style.line_count;
+  const spacing = lineSpacingOf(style);
+  $("s_line_spacing").value = spacing; $("v_line_spacing").textContent = spacing.toFixed(2);
   const mwr = Math.round(style.max_width_ratio * 100);
   $("s_max_width_ratio").value = mwr; $("v_max_width_ratio").textContent = mwr;
 
@@ -711,8 +738,12 @@ function applyTitlePanel(i) {
   setActiveToggle(`t${i}PositionGroup`, t.position);
   $(`s_t${i}_position_margin`).value = t.position_margin;
   $(`v_t${i}_position_margin`).textContent = t.position_margin;
+  const offsetX = Number(t.offset_x) || 0;
+  $(`s_t${i}_offset_x`).value = offsetX; $(`v_t${i}_offset_x`).textContent = offsetX;
   const width = Math.round(t.max_width_ratio * 100);
   $(`s_t${i}_max_width_ratio`).value = width; $(`v_t${i}_max_width_ratio`).textContent = width;
+  const spacing = lineSpacingOf(t);
+  $(`s_t${i}_line_spacing`).value = spacing; $(`v_t${i}_line_spacing`).textContent = spacing.toFixed(2);
 
   ["in", "out"].forEach((phase) => {
     const block = phase === "in" ? "AnimIn" : "AnimOut";
@@ -752,6 +783,7 @@ function updatePreview() {
   line.style.fontWeight = weight;
   line.style.fontStyle = italic ? "italic" : "normal";
   line.style.fontSize = Math.max(10, style.font_size * scale) + "px";
+  line.style.lineHeight = lineSpacingOf(style);
   line.style.color = style.text_color;
   const textCase = textCaseOf(style);
   line.style.textTransform = textCase === "upper" ? "uppercase" : textCase === "lower" ? "lowercase" : "none";
@@ -859,6 +891,7 @@ function drawTitleLine(i, text) {
   line.style.setProperty("-webkit-text-stroke",
     titleStyle.stroke_width > 0 ? `${titleStyle.stroke_width * scale}px ${titleStyle.stroke_color}` : "0px transparent");
   line.style.width = (titleStyle.max_width_ratio * 100) + "%";
+  line.style.lineHeight = lineSpacingOf(titleStyle);
 
   // Shrink until the block fits the same budget as in renderer.render_title_image.
   const budget = stage.clientHeight * 0.38;
@@ -876,6 +909,24 @@ function drawTitleLine(i, text) {
   else if (titleStyle.position === "bottom") top = stage.clientHeight - margin - height;
   else top = (stage.clientHeight - height) / 2;
   line.style.top = Math.max(0, Math.min(top, stage.clientHeight - height)) + "px";
+
+  // The block is as wide as max_width_ratio, but only the text is visible, so
+  // the shift is measured against the widest painted line - same rule as the
+  // renderer, so preview and video stop at the same place.
+  const shift = titleShift(titleStyle, inner, stage.clientWidth, scale);
+  line.style.transform = `translateX(calc(-50% + ${shift}px))`;
+}
+
+// How far a title may actually move: never past the frame edge.
+function titleShift(titleStyle, inner, stageWidth, scale) {
+  const wanted = (Number(titleStyle.offset_x) || 0) * scale;
+  if (!wanted) return 0;
+  const rects = inner.getClientRects();
+  let ink = 0;
+  for (const rect of rects) ink = Math.max(ink, rect.width);
+  if (!ink) ink = inner.offsetWidth;
+  const room = Math.max(0, (stageWidth - ink) / 2);
+  return Math.max(-room, Math.min(wanted, room));
 }
 
 function renderSafeZones() {
@@ -1247,6 +1298,49 @@ async function refreshAppInfo() {
 }
 
 // How much disk the cache takes, next to the GPU badge.
+// The header button doubles as the update state. Silent at startup: a machine
+// without internet must not get a message box it did not ask for.
+let updateReady = false;
+
+async function checkUpdates(byUser) {
+  const btn = $("updateBtn");
+  if (!btn) return null;
+  if (updateReady) return openProjectLink("repo");   // already found, just open it
+
+  const previous = btn.textContent;
+  if (byUser) {
+    btn.classList.add("checking");
+    btn.textContent = "Проверяю…";
+  }
+  let result = null;
+  try {
+    result = await api().check_updates();
+  } catch (e) {
+    result = { ok: false, error: String(e) };
+  }
+  btn.classList.remove("checking");
+
+  if (result && result.ok && result.update_available) {
+    updateReady = true;
+    btn.textContent = "Доступна " + result.latest + " ↗";
+    btn.classList.add("update-ready");
+    btn.title = (result.notes ? result.notes + "\n" : "")
+      + "Нажмите, чтобы открыть репозиторий. Обновление — распаковать архив поверх папки.";
+    return result;
+  }
+
+  btn.textContent = previous;
+  if (!byUser) return result;
+  if (result && result.ok) {
+    btn.textContent = "Версия актуальна";
+    showToast("У вас последняя версия — " + result.current);
+  } else {
+    showToast("Не удалось проверить обновления: " + ((result && result.error) || "нет связи"));
+  }
+  setTimeout(() => { if (!updateReady) btn.textContent = "Check updates ↗"; }, 4000);
+  return result;
+}
+
 async function refreshCacheBadge() {
   try {
     const usage = await api().cache_usage();
@@ -1343,6 +1437,7 @@ function init() {
   refreshGpuBadge();
   refreshAppInfo();
   refreshCacheBadge();
+  checkUpdates(false);
   refreshModelHint(true);
   $("modelSize").addEventListener("change", updateModelHint);
 }

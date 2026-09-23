@@ -83,6 +83,10 @@ body{
 .creator-link:hover{ color:var(--text); background:var(--panel-2); }
 .creator-link:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
 .app-version{ color:var(--text-dim); font-size:11px; margin-left:6px; font-variant-numeric:tabular-nums; }
+/* Новая версия на GitHub — единственное, что в шапке светится ярче фона. */
+.creator-link.update-ready{ color:var(--primary-text); background:var(--primary); font-weight:600; }
+.creator-link.update-ready:hover{ color:var(--primary-text); background:var(--primary); filter:brightness(1.08); }
+.creator-link.checking{ opacity:.6; cursor:default; }
 .cache-badge{ font:inherit; font-size:12px; cursor:pointer; }
 .cache-badge:hover{ border-color:var(--border-hover); color:var(--text); }
 
@@ -546,10 +550,17 @@ input[type=color]::-webkit-color-swatch{ border-radius:6px; border:none; }
     >@rinatmaksutov ↗</button>
     <button
       class="creator-link"
-      id="repoLink"
+      id="pageLink"
       type="button"
-      aria-label="Открыть репозиторий проекта на GitHub"
-      onclick="openProjectLink('repo')"
+      aria-label="Открыть страницу программы"
+      onclick="openProjectLink('page')"
+    >Страница программы ↗</button>
+    <button
+      class="creator-link"
+      id="updateBtn"
+      type="button"
+      aria-label="Проверить, вышла ли новая версия"
+      onclick="checkUpdates(true)"
     >Check updates ↗</button>
     <div class="spacer"></div>
     <button class="gpu-badge cache-badge" id="cacheBadge" type="button"
@@ -855,6 +866,10 @@ input[type=color]::-webkit-color-swatch{ border-radius:6px; border:none; }
 
           <label>Строк максимум <span class="range-val" id="v_line_count">1</span></label>
           <input type="range" id="s_line_count" min="1" max="4" value="1">
+
+          <label>Межстрочный интервал <span class="range-val" id="v_line_spacing">1.18</span></label>
+          <input type="range" id="s_line_spacing" min="0.8" max="2" step="0.02" value="1.18">
+          <div class="field-hint">Расстояние между строками в долях высоты строки. Виден только на тексте в две строки и больше.</div>
 
           <label>Ширина блока <span class="range-val" id="v_max_width_ratio">86</span></label>
           <input type="range" id="s_max_width_ratio" min="40" max="100" value="86">

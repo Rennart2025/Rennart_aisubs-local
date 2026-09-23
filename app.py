@@ -23,13 +23,14 @@ import pipeline as pipeline_mod
 import transcribe as transcribe_mod
 import mediaserver
 import fontlist
+from lib import updates
 from lib.manual_jobs import ManualJobService
 from lib.transcript_revisions import RevisionConflict, TranscriptError
 
 PRESETS_DIR = os.path.join(BASE_DIR, "presets")
 OUTPUT_DIR = os.path.join(BASE_DIR, "output")
 REVISIONS_DIR = os.path.join(BASE_DIR, "cache", "revisions")
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.2.2"
 CREATOR_CHANNEL_URL = "https://t.me/daipotestit"
 CACHE_DIR = os.path.join(BASE_DIR, "cache")
 
@@ -38,6 +39,7 @@ LINKS = {
     "author": CREATOR_CHANNEL_URL,
     "fork_author": "https://t.me/rinatmaksutov",
     "repo": "https://github.com/Rennart2025/Rennart_aisubs-local",
+    "page": "https://rennart2025.github.io/Rennart_aisubs-local/",
 }
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -244,6 +246,15 @@ class Api:
     def app_info(self):
         """Version and the links shown in the header."""
         return {"version": APP_VERSION, "links": dict(LINKS)}
+
+    def check_updates(self):
+        """Compares this build with version.json on GitHub.
+
+        Called once at startup and again on every click of the header button.
+        A machine without internet gets ok=False and keeps working: the button
+        just stays as it was.
+        """
+        return updates.check(APP_VERSION)
 
     def open_link(self, key):
         """Opens one of the known links. A key, never a URL from the page."""
