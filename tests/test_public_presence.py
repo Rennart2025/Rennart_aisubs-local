@@ -43,87 +43,51 @@ def png_dimensions(path):
 
 
 class ScreenshotTests(unittest.TestCase):
-    def test_product_screenshots_are_current_and_consistent(self):
-        auto = ROOT / "docs" / "screenshot.png"
-        manual = ROOT / "docs" / "screenshot-manual.png"
+    def test_the_interface_screenshot_is_present_and_readable(self):
+        shot = ROOT / "docs" / "screen-main.png"
 
-        self.assertTrue(auto.is_file())
-        self.assertTrue(manual.is_file())
-        self.assertGreater(auto.stat().st_size, 50_000)
-        self.assertGreater(manual.stat().st_size, 50_000)
-        self.assertEqual((1440, 900), png_dimensions(auto))
-        self.assertEqual(png_dimensions(auto), png_dimensions(manual))
+        self.assertTrue(shot.is_file())
+        self.assertGreater(shot.stat().st_size, 50_000)
+        width, height = png_dimensions(shot)
+        self.assertGreaterEqual(width, 1280, "скриншот слишком мелкий для страницы")
+        self.assertGreater(width, height, "ожидается снимок окна целиком")
 
 
 class GitHubPagesTests(unittest.TestCase):
+    """docs/index.html is the project page; it must stand on its own."""
+
     def setUp(self):
         self.path = ROOT / "docs" / "index.html"
+        self.html = self.path.read_text(encoding="utf-8")
         self.parser = PageContractParser()
-        self.parser.feed(self.path.read_text(encoding="utf-8"))
+        self.parser.feed(self.html)
 
-    def test_landing_page_restores_the_pre_modes_structure(self):
-        html = self.path.read_text(encoding="utf-8")
-        headings = (
-            "Что умеет",
-            "Интерфейс по частям",
-            "Типографика без ручной правки",
-            "Как всё устроено",
-            "Установка",
-            "Требования",
-        )
-
+    def test_page_covers_the_sections_a_visitor_comes_for(self):
         self.assertEqual(1, self.parser.heading_counts["h1"])
-        self.assertEqual(6, self.parser.heading_counts["h2"])
-        for heading in headings:
-            self.assertIn(f"<h2>{heading}</h2>", html)
-        self.assertNotIn('id="modes"', html)
-        self.assertNotIn("Режимы обработки", html)
+        for heading in ("Что умеет", "Как это работает", "Экран программы",
+                        "Установка", "Требования"):
+            self.assertIn(f"<h2>{heading}</h2>", self.html)
 
-    def test_public_destinations_and_historical_product_captures_are_present(self):
-        expected_links = {
-            "https://github.com/jimmorisedu-boop/aisubs-local",
-            "https://t.me/daipotestit",
-        }
-        expected_images = {
-            "screenshot.png",
-            "ui-input.png",
-            "ui-preview.png",
-            "ui-presets.png",
-            "ui-style.png",
-            "ui-style-2.png",
-        }
+    def test_page_credits_this_fork_and_the_original_project(self):
+        self.assertIn("https://github.com/Rennart2025/Rennart_aisubs-local", self.parser.links)
+        self.assertIn("https://t.me/rinatmaksutov", self.parser.links)
+        self.assertIn("https://github.com/jimmorisedu-boop/aisubs-local", self.parser.links)
+        self.assertIn("https://t.me/daipotestit", self.parser.links)
 
-        self.assertTrue(expected_links.issubset(set(self.parser.links)))
-        images = {src: alt for src, alt in self.parser.images}
-        self.assertEqual(expected_images, set(images))
-        for alt in images.values():
-            self.assertTrue(alt.strip())
+    def test_nothing_is_left_from_the_interface_before_the_single_screen(self):
+        for phrase in ("Режимы обработки", "Мануал", "Manual Mode", "Авто-режим"):
+            self.assertNotIn(phrase, self.html)
 
-    def test_copy_matches_the_pre_modes_product_explanation(self):
-        html = self.path.read_text(encoding="utf-8")
-
-        for phrase in (
-            "Whisper",
-            "ffmpeg",
-            "setup.bat",
-            "run.bat",
-            "Windows 10 или 11",
-            "Типографика без ручной правки",
-        ):
-            self.assertIn(phrase, html)
-        for phrase in (
-            "Режимы обработки",
-            "Два режима. Одна очередь.",
-            "AUTO",
-            "MANUAL",
-        ):
-            self.assertNotIn(phrase, html)
-
-    def test_local_assets_resolve_without_external_runtime_dependencies(self):
-        self.assertEqual([], self.parser.external_runtime_assets)
-        for src, _ in self.parser.images:
+    def test_every_image_has_a_description_and_exists(self):
+        self.assertTrue(self.parser.images, "на странице нет ни одного скриншота")
+        for src, alt in self.parser.images:
+            self.assertTrue(alt.strip(), src)
             if src and not src.startswith(("http://", "https://", "/")):
                 self.assertTrue((self.path.parent / src).is_file(), src)
+
+    def test_page_loads_nothing_from_the_internet(self):
+        """A project page that fetches fonts or scripts breaks without them."""
+        self.assertEqual([], self.parser.external_runtime_assets)
         for href in self.parser.stylesheets:
             if not href.startswith(("http://", "https://", "/")):
                 self.assertTrue((self.path.parent / href).is_file(), href)
