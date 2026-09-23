@@ -18,6 +18,9 @@ let savesInFlight = 0;
 let editorLocked = false;         // word list drawn read-only (file is being rendered)
 let seekingToWord = false;        // a click on a word is moving the playhead
 
+// t() - the dictionary - comes from app.js, which loads first and shares the
+// same global scope.
+
 const FILE_STATUS = {
   pending:       ["○", "Текст не распознан", ""],
   queued:        ["◌", "В очереди", "running"],
@@ -148,7 +151,7 @@ async function saveTitles() {
   if (!selectedId) return;
   const result = await api().set_overlays(selectedId, readTitles());
   if (!result || !result.ok) {
-    showToast("Заголовки не сохранены: " + ((result && result.error) || "ошибка"));
+    showToast(t("Заголовки не сохранены: {why}", { why: t((result && result.error) || "ошибка") }));
     return;
   }
   applySnapshot(result.job);
@@ -207,21 +210,34 @@ function pickVideos() {
 window.onVideosPicked = async function (paths) {
   if (!paths || !paths.length) return;
   const result = await api().add_videos(paths);
-  if (!result || !result.ok) return showToast("Не удалось добавить: " + ((result && result.error) || "ошибка"));
+  if (!result || !result.ok) return showToast(t("Не удалось добавить: {why}", { why: t((result && result.error) || "ошибка") }));
   applySnapshot(result.job);
   if (result.added && result.added.length) {
     selectItem(result.added[0]);
   } else {
-    showToast("Эти файлы уже в списке", "ok");
+    showToast(t("Эти файлы уже в списке"), "ok");
   }
 };
+
+// Called when the interface language changes: everything this file writes on
+// screen is produced here, so it is redrawn rather than translated in place.
+function redrawWorkspaceText() {
+  if (ws) {
+    renderFileList();
+    updateActionButtons();
+    updateProgress();
+  }
+  updatePlayerBar();
+  renderEditor();
+}
 
 window.onWorkspaceUpdated = function (snapshot) {
   if (snapshot) applySnapshot(snapshot);
 };
 
 window.onRenderDone = function (result) {
-  const text = `Рендер: готово ${result.completed}` + (result.failed ? `, ошибок ${result.failed}` : "");
+  const text = t("Рендер: готово {done}", { done: result.completed })
+    + (result.failed ? t(", ошибок {failed}", { failed: result.failed }) : "");
   lastMessage = text;
   showToast(text, result.failed ? undefined : "ok");
   const done = ws && ws.items.filter((item) => item.output);
@@ -288,7 +304,8 @@ function renderFileList() {
   const list = $("fileList");
   list.innerHTML = "";
   items.forEach((item) => {
-    const [icon, label, tone] = FILE_STATUS[item.state] || ["•", item.state, ""];
+    const [icon, rawLabel, tone] = FILE_STATUS[item.state] || ["•", item.state, ""];
+    const label = t(rawLabel);
     const row = document.createElement("div");
     row.className = `file-row ${tone}` + (item.item_id === selectedId ? " selected" : "");
     row.setAttribute("role", "option");
@@ -305,10 +322,10 @@ function renderFileList() {
     name.textContent = item.name;
     const small = document.createElement("small");
     if (item.error) {
-      small.textContent = item.error;
+      small.textContent = t(item.error);
       small.className = "error";
     } else if (RUNNING.has(item.state) && item.state !== "queued") {
-      small.textContent = `${STAGE_LABELS[item.stage] || label} ${item.progress || 0}%`;
+      small.textContent = `${t(STAGE_LABELS[item.stage]) || label} ${item.progress || 0}%`;
     } else {
       small.textContent = label;
     }
@@ -327,7 +344,7 @@ function renderFileList() {
       const remove = document.createElement("button");
       remove.className = "remove";
       remove.type = "button";
-      remove.title = "Убрать из списка (файл на диске останется)";
+      remove.title = t("Убрать из списка (файл на диске останется)");
       remove.textContent = "×";
       remove.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -359,13 +376,13 @@ function updateActionButtons() {
   transcribe.querySelector(".label").textContent = actions.transcribe.label;
   transcribe.disabled = !actions.transcribe.enabled;
   transcribe.title = actions.transcribe.ids.length
-    ? "Распознать речь во всех файлах, где текста ещё нет"
-    : "Все файлы уже распознаны";
+    ? t("Распознать речь во всех файлах, где текста ещё нет")
+    : t("Все файлы уже распознаны");
   render.querySelector(".label").textContent = actions.render.label;
   render.disabled = !actions.render.enabled;
   render.title = actions.render.again
-    ? "Отрендерить выбранный файл ещё раз с текущим стилем"
-    : "Вшить субтитры во все файлы с готовым текстом";
+    ? t("Отрендерить выбранный файл ещё раз с текущим стилем")
+    : t("Вшить субтитры во все файлы с готовым текстом");
   // The step that makes sense next gets the bright button.
   const renderIsNext = !actions.transcribe.ids.length && actions.render.ids.length;
   transcribe.classList.toggle("secondary", Boolean(renderIsNext));
@@ -382,18 +399,18 @@ function updateProgress() {
   const active = items.find((item) => item.state === "transcribing" || item.state === "rendering");
   if (active) {
     const waiting = items.filter((item) => item.state === "queued").length;
-    const label = STAGE_LABELS[active.stage] || (active.state === "rendering" ? "Рендер" : "Распознавание");
-    setProgress(`${active.name} · ${label}` + (waiting ? ` · ещё в очереди: ${waiting}` : ""), active.progress || 0);
+    const label = t(STAGE_LABELS[active.stage]) || t(active.state === "rendering" ? "Рендер" : "Распознавание");
+    setProgress(`${active.name} · ${label}` + (waiting ? t(" · ещё в очереди: {n}", { n: waiting }) : ""), active.progress || 0);
     $("liveStatus").textContent = `${active.name}: ${label}`;
     return;
   }
   if (items.some((item) => item.state === "queued")) {
-    setProgress("Подготовка…", 0);
+    setProgress(t("Подготовка…"), 0);
     return;
   }
-  if (!items.length) setProgress("Добавьте видео", null);
+  if (!items.length) setProgress(t("Добавьте видео"), null);
   else if (lastMessage) setProgress(lastMessage, 100);
-  else setProgress("Готово к работе", null);
+  else setProgress(t("Готово к работе"), null);
 }
 
 // ---------------- selecting a file ----------------
@@ -426,7 +443,7 @@ function showNothingSelected() {
   player.load();
   $("previewStage").classList.remove("showing-output");
   document.querySelector(".preview-empty").innerHTML =
-    "Добавьте видео — здесь будет кадр<br>с субтитрами в выбранном стиле";
+    t("Добавьте видео — здесь будет кадр<br>с субтитрами в выбранном стиле");
   clearStageFrame();
   updatePlayerBar();
   renderEditor();
@@ -448,7 +465,7 @@ async function loadStageMedia() {
     player.removeAttribute("src");
     player.removeAttribute("poster");
     player.load();
-    document.querySelector(".preview-empty").textContent = "Исходный файл не найден: " + item.path;
+    document.querySelector(".preview-empty").textContent = t("Исходный файл не найден: ") + item.path;
     clearStageFrame();
     updatePlayerBar();
     return;
@@ -511,7 +528,7 @@ function updatePlayerBar() {
   $("playBtn").disabled = !hasMedia;
   $("seekBar").disabled = !hasMedia;
   $("playBtn").textContent = player.paused ? "▶" : "❚❚";
-  $("playBtn").setAttribute("aria-label", player.paused ? "Воспроизвести" : "Пауза");
+  $("playBtn").setAttribute("aria-label", t(player.paused ? "Воспроизвести" : "Пауза"));
   $("seekBar").value = player.duration ? Math.round(1000 * player.currentTime / player.duration) : 0;
   $("timeLabel").textContent = `${formatTime(player.currentTime)} / ${formatTime(player.duration)}`;
   const item = selectedItem();
@@ -629,7 +646,7 @@ function previewCaptions(transcript) {
 
 // Called by updatePreview() in app.js: the caption the render will show.
 function previewSample() {
-  if (showingOutput) return { words: PREVIEW_SAMPLE, active: 0, hidden: true };
+  if (showingOutput) return { words: previewSampleWords(), active: 0, hidden: true };
   const transcript = transcripts.get(selectedId);
   if (!transcript) return null;
   const { captions, byWord } = previewCaptions(transcript);
@@ -682,28 +699,28 @@ function renderEditor() {
   }
   if (!item) {
     return setEditorEmpty(ws && ws.items.length
-      ? "Выберите видео в списке слева."
-      : "Добавьте видео слева.<br>Потом нажмите <b>Transcribe</b> — здесь появится распознанный текст.");
+      ? t("Выберите видео в списке слева.")
+      : t("Добавьте видео слева.<br>Потом нажмите <b>Transcribe</b> — здесь появится распознанный текст."));
   }
   const transcript = transcripts.get(item.item_id);
   if (item.state === "queued" || item.state === "transcribing") {
     const pct = item.state === "transcribing" ? ` ${item.progress || 0}%` : "";
-    return setEditorEmpty(`Распознаём речь…${pct}<br><small>Текст появится здесь, как только файл будет готов.</small>`);
+    return setEditorEmpty(t("Распознаём речь…{pct}<br><small>Текст появится здесь, как только файл будет готов.</small>", { pct }));
   }
   if (item.state === "pending" || (item.state === "cancelled" && !item.revision)) {
     return setEditorEmpty(
-      "Текст для этого видео ещё не распознан.<br>Нажмите <b>Transcribe</b> внизу — распознаются все новые файлы.",
-      { id: "transcribe", label: "Распознать только этот файл" });
+      t("Текст для этого видео ещё не распознан.<br>Нажмите <b>Transcribe</b> внизу — распознаются все новые файлы."),
+      { id: "transcribe", label: t("Распознать только этот файл") });
   }
   if (item.state === "failed" && !item.revision) {
-    return setEditorEmpty(`Не удалось распознать:<br><small>${escapeHtml(item.error || "")}</small>`,
-      { id: "transcribe", label: "Попробовать ещё раз" });
+    return setEditorEmpty(t("Не удалось распознать:<br><small>{why}</small>", { why: escapeHtml(t(item.error || "")) }),
+      { id: "transcribe", label: t("Попробовать ещё раз") });
   }
   if (item.state === "no_speech") {
-    return setEditorEmpty("В этом видео речь не найдена.<br><small>Можно попробовать другую модель или указать язык.</small>",
-      { id: "retranscribe", label: "Распознать заново" });
+    return setEditorEmpty(t("В этом видео речь не найдена.<br><small>Можно попробовать другую модель или указать язык.</small>"),
+      { id: "retranscribe", label: t("Распознать заново") });
   }
-  if (!transcript) return setEditorEmpty("Загружаем текст…");
+  if (!transcript) return setEditorEmpty(t("Загружаем текст…"));
 
   $("editorEmpty").classList.add("hidden");
   $("editorBody").classList.remove("hidden");
@@ -718,7 +735,7 @@ function updateEditorChrome() {
   if (!item || !transcript) return;
   const reasons = ManualState.attentionReasons(transcript);
   const bad = Object.keys(ManualState.timingProblems(transcript)).length;
-  if (bad) reasons.unshift(`Проверьте тайминги: ${bad} (выделены красным) — с ними рендер не пройдёт`);
+  if (bad) reasons.unshift(t("Проверьте тайминги: {n} (выделены красным) — с ними рендер не пройдёт", { n: bad }));
   const box = $("editorAttention");
   box.classList.toggle("hidden", !reasons.length);
   box.classList.toggle("bad", bad > 0);
@@ -726,7 +743,7 @@ function updateEditorChrome() {
   $("retranscribeBtn").disabled = isRunning;
   $("openResultBtn").classList.toggle("hidden", !item.output);
   if (!$("editorSaveState").textContent || item.state === "completed") {
-    $("editorSaveState").textContent = item.state === "completed" ? "отрендерено" : "";
+    $("editorSaveState").textContent = item.state === "completed" ? t("отрендерено") : "";
   }
   updatePlayerBar();
 }
@@ -753,7 +770,7 @@ function renderWordList(transcript, locked) {
     text.className = "word-text";
     text.value = String(word.word).trim();
     text.disabled = Boolean(word.deleted) || locked;
-    text.setAttribute("aria-label", "Слово");
+    text.setAttribute("aria-label", t("Слово"));
     text.addEventListener("focus", () => focusWord(word));
     text.addEventListener("input", () => {
       const value = text.value.trim();
@@ -771,8 +788,8 @@ function renderWordList(transcript, locked) {
       if (next) { next.focus(); next.select(); }
     });
 
-    const start = timingInput(word.start, "Начало слова, секунды", locked || word.deleted);
-    const end = timingInput(word.end, "Конец слова, секунды", locked || word.deleted);
+    const start = timingInput(word.start, t("Начало слова, секунды"), locked || word.deleted);
+    const end = timingInput(word.end, t("Конец слова, секунды"), locked || word.deleted);
     const timingChanged = () => {
       const s = Number(start.value), e = Number(end.value);
       if (!isFinite(s) || !isFinite(e)) return;
@@ -789,14 +806,14 @@ function renderWordList(transcript, locked) {
     remove.type = "button";
     remove.className = "word-del";
     remove.textContent = word.deleted ? "↶" : "×";
-    remove.title = word.deleted ? "Вернуть слово" : "Удалить слово";
+    remove.title = t(word.deleted ? "Вернуть слово" : "Удалить слово");
     remove.disabled = locked;
     remove.addEventListener("click", () => saveNow([{ op: word.deleted ? "restore" : "delete", word_id: word.id }], true));
 
     const insert = document.createElement("button");
     insert.type = "button";
     insert.textContent = "+";
-    insert.title = "Вставить слово после";
+    insert.title = t("Вставить слово после");
     insert.disabled = locked || word.deleted;
     insert.addEventListener("click", () => insertWordAfter(word));
 
@@ -844,7 +861,7 @@ function focusWord(word) {
 }
 
 function insertWordAfter(word) {
-  const text = window.prompt("Новое слово:", "");
+  const text = window.prompt(t("Новое слово:"), "");
   if (!text || !text.trim()) return;
   const transcript = transcripts.get(selectedId);
   const active = transcript.words.filter((candidate) => !candidate.deleted);
@@ -860,7 +877,7 @@ function insertWordAfter(word) {
 function queuePatch(key, operation) {
   if (!pendingItemId) pendingItemId = selectedId;
   pendingPatches.set(key, operation);
-  $("editorSaveState").textContent = "есть несохранённые правки";
+  $("editorSaveState").textContent = t("есть несохранённые правки");
   clearTimeout(patchTimer);
   patchTimer = setTimeout(flushPatches, 650);
 }
@@ -881,19 +898,19 @@ function saveNow(operations, rerender, targetItemId) {
     try {
       const base = transcripts.get(itemId);
       if (!base) return;
-      if (itemId === selectedId) $("editorSaveState").textContent = "сохраняем…";
+      if (itemId === selectedId) $("editorSaveState").textContent = t("сохраняем…");
       const result = await api().apply_transcript_patch(itemId, base.revision, operations);
       if (!result || !result.ok) {
         if (itemId === selectedId) {
           $("editorSaveState").textContent = result && result.code === "revision_conflict"
-            ? "текст изменился — перечитываем" : "не сохранено: " + ((result && result.error) || "ошибка");
+            ? t("текст изменился — перечитываем") : t("не сохранено: ") + t((result && result.error) || "ошибка");
         }
         if (result && result.code === "revision_conflict") transcripts.delete(itemId);
         return;
       }
       transcripts.set(itemId, result.transcript);
       if (itemId === selectedId) {
-        $("editorSaveState").textContent = "сохранено";
+        $("editorSaveState").textContent = t("сохранено");
         if (rerender) renderWordList(result.transcript, false);
         updateEditorChrome();
         updatePreview();
@@ -917,23 +934,23 @@ async function runTranscribe() {
   }
   lastMessage = "";
   const result = await api().transcribe(Object.assign({ item_ids: actions.transcribe.ids }, recognitionArgs()));
-  if (!result || !result.ok) showToast((result && result.error) || "Распознавание не запущено");
+  if (!result || !result.ok) showToast((result && result.error) || t("Распознавание не запущено"));
 }
 
 async function transcribeOnly(itemId) {
   if (!itemId) return;
   lastMessage = "";
   const result = await api().transcribe(Object.assign({ item_ids: [itemId] }, recognitionArgs()));
-  if (!result || !result.ok) showToast((result && result.error) || "Распознавание не запущено");
+  if (!result || !result.ok) showToast((result && result.error) || t("Распознавание не запущено"));
 }
 
 async function retranscribe(itemId) {
   if (!itemId) return;
   await flushPatches();
   const result = await api().retranscribe(itemId, recognitionArgs());
-  if (!result || !result.ok) return showToast((result && result.error) || "Распознавание не запущено");
+  if (!result || !result.ok) return showToast((result && result.error) || t("Распознавание не запущено"));
   transcripts.delete(itemId);
-  showToast("Распознаём заново; прошлая версия текста сохранена в истории", "ok");
+  showToast(t("Распознаём заново; прошлая версия текста сохранена в истории"), "ok");
 }
 
 async function runRender() {
@@ -946,23 +963,23 @@ async function runRender() {
   });
   if (transcriptProblems.length) {
     const names = ws.items.filter((item) => transcriptProblems.includes(item.item_id)).map((item) => item.name);
-    showToast("Есть ошибки в таймингах, эти файлы не отрендерятся: " + names.join(", "));
+    showToast(t("Есть ошибки в таймингах, эти файлы не отрендерятся: ") + names.join(", "));
   }
   lastMessage = "";
   await saveTitles();
   const payload = Object.assign({}, style, { title_styles: titleStyles });
   const result = await api().render({ item_ids: actions.render.ids, style: payload });
-  if (!result || !result.ok) showToast((result && result.error) || "Рендер не запущен");
+  if (!result || !result.ok) showToast((result && result.error) || t("Рендер не запущен"));
 }
 
 async function cancelCurrentQueue() {
   $("cancelBtn").disabled = true;
-  $("cancelBtn").textContent = "Останавливаем после файла…";
+  $("cancelBtn").textContent = t("Останавливаем после файла…");
   await api().cancel_queue();
-  showToast("Текущий файл доделается, остальные будут остановлены", "ok");
+  showToast(t("Текущий файл доделается, остальные будут остановлены"), "ok");
   setTimeout(() => {
     $("cancelBtn").disabled = false;
-    $("cancelBtn").textContent = "Остановить после файла";
+    $("cancelBtn").textContent = t("Остановить после файла");
   }, 1500);
 }
 
@@ -970,7 +987,7 @@ async function removeItems(itemIds) {
   if (!itemIds.length) return;
   await flushPatches();
   const result = await api().remove_videos(itemIds);
-  if (!result || !result.ok) return showToast("Не удалось убрать: " + ((result && result.error) || "ошибка"));
+  if (!result || !result.ok) return showToast(t("Не удалось убрать: ") + t((result && result.error) || "ошибка"));
   itemIds.forEach((id) => transcripts.delete(id));
   applySnapshot(result.job);
 }
@@ -979,15 +996,15 @@ let clearArmed = null;
 function clearList() {
   const button = $("clearListBtn");
   if (!ws || !ws.items.length) return;
-  if (isRunning) return showToast("Дождитесь окончания обработки или остановите её");
+  if (isRunning) return showToast(t("Дождитесь окончания обработки или остановите её"));
   if (!clearArmed) {
-    button.textContent = "Точно?";
-    clearArmed = setTimeout(() => { clearArmed = null; button.textContent = "Очистить"; }, 3000);
+    button.textContent = t("Точно?");
+    clearArmed = setTimeout(() => { clearArmed = null; button.textContent = t("Очистить"); }, 3000);
     return;
   }
   clearTimeout(clearArmed);
   clearArmed = null;
-  button.textContent = "Очистить";
+  button.textContent = t("Очистить");
   lastMessage = "";
   removeItems(ws.items.map((item) => item.item_id));
 }

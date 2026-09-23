@@ -136,6 +136,16 @@ class ReadmeTests(unittest.TestCase):
                 continue
             self.assertTrue((self.path.parent / target).is_file(), target)
 
+    def test_readme_opens_with_a_short_english_summary(self):
+        """Английский читатель не должен продираться через русский текст."""
+        head = self.markdown.split("# AISubs — субтитры")[0]
+
+        self.assertIn("<details>", head)
+        self.assertIn("English", head)
+        self.assertIn("setup.bat", head, "в английской версии нет установки")
+        self.assertLess(len(head.split()), len(self.markdown.split()) / 2,
+                        "английская версия должна быть краткой")
+
     def test_readme_documents_the_titles_feature(self):
         self.assertIn("## Заголовки", self.markdown)
         for phrase in ("Fade in", "Fade out", "Заголовок 2"):

@@ -11,7 +11,7 @@ test('render gate explains how many transcriptions are still active', () => {
     items: [{ state: 'transcribing' }, { state: 'queued' }, { state: 'approved' }],
   });
 
-  assert.deepEqual(gate, { enabled: false, label: 'Ждём транскрибацию: 2' });
+  assert.deepEqual(gate, { enabled: false, label: 'Ждём распознавание: 2' });
 });
 
 test('render gate allows one batch action for approved files', () => {

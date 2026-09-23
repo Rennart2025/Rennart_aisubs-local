@@ -12,15 +12,25 @@
   const RENDER_READY = new Set(["transcribed", "needs_review", "approved", "render_failed"]);
   const LOW_CONFIDENCE = 0.65;
 
+  // Same contract as I18n.t, but this module also runs under Node in the
+  // tests, where there is no interface and no dictionary: then the Russian
+  // source text is the answer.
+  function tr(text, vars) {
+    const i18n = typeof globalThis !== "undefined" && globalThis.I18n;
+    if (i18n) return i18n.t(text, vars);
+    return vars ? text.replace(/\{(\w+)\}/g, (whole, key) =>
+      (key in vars ? String(vars[key]) : whole)) : text;
+  }
+
   function renderGate(snapshot) {
     const items = (snapshot && snapshot.items) || [];
     const approved = (snapshot && snapshot.approved_count) || 0;
     if (!snapshot || !snapshot.transcription_settled) {
       const active = items.filter((item) => ACTIVE_TRANSCRIPTION.has(item.state)).length;
-      return { enabled: false, label: `Ждём транскрибацию: ${active}` };
+      return { enabled: false, label: tr("Ждём распознавание: {n}", { n: active }) };
     }
-    if (!approved) return { enabled: false, label: "Одобрите хотя бы один файл" };
-    return { enabled: true, label: `Рендер одобренных (${approved})` };
+    if (!approved) return { enabled: false, label: tr("Одобрите хотя бы один файл") };
+    return { enabled: true, label: tr("Рендер одобренных ({n})", { n: approved }) };
   }
 
   // What the two main buttons do right now.
@@ -46,10 +56,10 @@
     }
 
     const parts = [];
-    if (toTranscribe.length) parts.push(`ждут распознавания: ${toTranscribe.length}`);
-    if (ready.length) parts.push(`готовы к рендеру: ${ready.length}`);
+    if (toTranscribe.length) parts.push(tr("ждут распознавания: {n}", { n: toTranscribe.length }));
+    if (ready.length) parts.push(tr("готовы к рендеру: {n}", { n: ready.length }));
     const done = items.filter((item) => item.state === "completed").length;
-    if (done) parts.push(`готово: ${done}`);
+    if (done) parts.push(tr("готово: {n}", { n: done }));
 
     return {
       busy,
@@ -68,11 +78,13 @@
     };
   }
 
+  // Russian has three forms; English maps all three onto "word"/"words" in
+  // the dictionary, so the caller never needs to know which language it is in.
   function wordsNoun(n) {
     const mod10 = n % 10, mod100 = n % 100;
-    if (mod10 === 1 && mod100 !== 11) return "слово";
-    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "слова";
-    return "слов";
+    if (mod10 === 1 && mod100 !== 11) return tr("слово");
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return tr("слова");
+    return tr("слов");
   }
 
   function activeWords(transcript) {
@@ -85,8 +97,8 @@
       (word) => word.probability !== null && word.probability !== undefined && word.probability < LOW_CONFIDENCE
     ).length;
     const reasons = [];
-    if (low) reasons.push(`Низкая уверенность: ${low} ${wordsNoun(low)}`);
-    if (!words.length) reasons.push("Речь не распознана");
+    if (low) reasons.push(tr("Низкая уверенность: {n} {word}", { n: low, word: wordsNoun(low) }));
+    if (!words.length) reasons.push(tr("Речь не распознана"));
     return reasons;
   }
 
@@ -98,9 +110,9 @@
     let previous = null;
     activeWords(transcript).forEach((word) => {
       const start = Number(word.start), end = Number(word.end);
-      if (!(start >= 0) || !(end > start)) problems[word.id] = "конец раньше начала";
-      else if (duration && end > duration) problems[word.id] = "выходит за конец видео";
-      else if (previous && start < Number(previous.end)) problems[word.id] = "наезжает на предыдущее слово";
+      if (!(start >= 0) || !(end > start)) problems[word.id] = tr("конец раньше начала");
+      else if (duration && end > duration) problems[word.id] = tr("выходит за конец видео");
+      else if (previous && start < Number(previous.end)) problems[word.id] = tr("наезжает на предыдущее слово");
       previous = word;
     });
     return problems;

@@ -88,6 +88,15 @@ body{
 .creator-link.update-ready:hover{ color:var(--primary-text); background:var(--primary); filter:brightness(1.08); }
 .creator-link.checking{ opacity:.6; cursor:default; }
 .cache-badge{ font:inherit; font-size:12px; cursor:pointer; }
+/* Язык интерфейса: две кнопки в оправе бейджа, рядом с кэшем. */
+.lang-switch{ display:flex; gap:2px; padding:3px; border-radius:999px;
+  background:var(--panel-2); border:1px solid var(--border); -webkit-app-region:no-drag; }
+.lang-switch button{ border:0; background:transparent; color:var(--text-dim); cursor:pointer;
+  font:inherit; font-size:11px; font-weight:700; letter-spacing:.04em;
+  padding:3px 9px; border-radius:999px; }
+.lang-switch button:hover{ color:var(--text); }
+.lang-switch button.active{ background:var(--control-on); color:var(--text); }
+.lang-switch button:focus-visible{ outline:2px solid var(--accent); outline-offset:1px; }
 .cache-badge:hover{ border-color:var(--border-hover); color:var(--text); }
 
 /* ---------- titles (manual text over the video) ---------- */
@@ -563,6 +572,10 @@ input[type=color]::-webkit-color-swatch{ border-radius:6px; border:none; }
       onclick="checkUpdates(true)"
     >Check updates ↗</button>
     <div class="spacer"></div>
+    <div class="lang-switch" id="langSwitch" role="group" aria-label="Язык интерфейса">
+      <button type="button" data-lang="ru" class="active" title="Русский интерфейс">RU</button>
+      <button type="button" data-lang="en" title="English interface">EN</button>
+    </div>
     <button class="gpu-badge cache-badge" id="cacheBadge" type="button"
             title="Открыть папку кэша" onclick="openCacheFolder()">Кэш —</button>
     <div class="gpu-badge"><span class="dot" id="gpuDot"></span><span id="gpuLabel">определение GPU...</span></div>
@@ -580,7 +593,7 @@ input[type=color]::-webkit-color-swatch{ border-radius:6px; border:none; }
           <div class="dropzone-hint">или нажмите, чтобы выбрать — можно сразу несколько</div>
         </div>
         <div id="fileListWrap" class="hidden">
-          <div class="file-list" id="fileList" role="listbox" aria-label="Видео"></div>
+          <div class="file-list" id="fileList" role="listbox" aria-label="Видео" data-i18n-skip></div>
           <div class="list-actions">
             <button class="add-more-btn" type="button" onclick="pickVideos()">+ Добавить видео</button>
             <button class="add-more-btn clear-btn" type="button" id="clearListBtn" title="Убрать все файлы из списка (сами видео не удаляются)">Очистить</button>
@@ -629,9 +642,9 @@ input[type=color]::-webkit-color-swatch{ border-radius:6px; border:none; }
           <div class="preview-empty">Добавьте видео — здесь будет кадр<br>с субтитрами в выбранном стиле</div>
           <div class="safe-zone-layer" id="safeZoneLayer" aria-hidden="true"></div>
           <div class="text-box" id="textBox"><span class="text-box-size" id="textBoxSize"></span></div>
-          <div class="title-line" id="titleLine0"></div>
-          <div class="title-line" id="titleLine1"></div>
-          <div class="preview-line" id="previewLine"></div>
+          <div class="title-line" id="titleLine0" data-i18n-skip></div>
+          <div class="title-line" id="titleLine1" data-i18n-skip></div>
+          <div class="preview-line" id="previewLine" data-i18n-skip></div>
         </div>
       </div>
       <div class="preview-bottom">
@@ -695,7 +708,7 @@ input[type=color]::-webkit-color-swatch{ border-radius:6px; border:none; }
         </div>
         <div id="editorAttention" class="attention-box hidden"></div>
         <div class="word-head" aria-hidden="true"><span>Слово</span><span>Начало, с</span><span>Конец, с</span><span></span><span></span></div>
-        <div class="word-list" id="wordList"></div>
+        <div class="word-list" id="wordList" data-i18n-skip></div>
         <div class="editor-toolbar">
           <button type="button" id="retranscribeBtn" title="Новая версия текста с текущими настройками распознавания">Распознать заново</button>
           <button type="button" id="openResultBtn" class="hidden">Открыть результат</button>
@@ -922,6 +935,8 @@ input[type=color]::-webkit-color-swatch{ border-radius:6px; border:none; }
 
 </div>
 
+<script src="i18n.js"></script>
+<script src="i18n/en.js"></script>
 <script src="manual-state.js"></script>
 <script src="creator-channel.js"></script>
 <script src="safe-zones.js"></script>

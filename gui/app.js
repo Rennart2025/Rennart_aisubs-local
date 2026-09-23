@@ -189,6 +189,9 @@ let safeZoneState = SafeZones.createState();
 
 const $ = (id) => document.getElementById(id);
 
+// Short name for the dictionary; the key of every string is its Russian original.
+const t = (text, vars) => (window.I18n ? window.I18n.t(text, vars) : text);
+
 function api() {
   return window.pywebview && window.pywebview.api;
 }
@@ -545,6 +548,7 @@ function titlePanelMarkup(i) {
 function setupTitleBindings() {
   TITLE_SLOTS.forEach((i) => {
     $(`titlePanel${i}`).innerHTML = titlePanelMarkup(i);
+    window.I18n.apply($(`titlePanel${i}`));
     bindTitlePanel(i);
   });
 }
@@ -692,7 +696,7 @@ const CAPTION_MODE_HINTS = {
 };
 
 function updateCaptionModeHint() {
-  $("captionModeHint").textContent = CAPTION_MODE_HINTS[ManualState.captionModeOf(style)];
+  $("captionModeHint").textContent = t(CAPTION_MODE_HINTS[ManualState.captionModeOf(style)]);
 }
 
 function applyTitleControls() {
@@ -774,7 +778,7 @@ function updatePreview() {
   // Real words of the selected transcript around the playhead when there is
   // one, the sample line otherwise.
   const sample = typeof previewSample === "function" ? previewSample() : null;
-  const words = sample ? sample.words : PREVIEW_SAMPLE;
+  const words = sample ? sample.words : previewSampleWords();
   const activeIdx = sample ? sample.active : 1;
   line.style.visibility = sample && sample.hidden ? "hidden" : "visible";
   const [family, weight, italic] = fontCss(style.font);
@@ -972,17 +976,17 @@ function renderSafeZones() {
   const safeActive = SafeZones.isSafePosition(style);
   snapButton.setAttribute("aria-pressed", safeActive ? "true" : "false");
 
-  let snapHint = "Включите безопасную зону под предпросмотром";
+  let snapHint = t("Включите безопасную зону под предпросмотром");
   if (!previewVideo) snapHint = safeActive
-    ? "Безопасный режим сохранён; загрузите видео для расчёта"
-    : "Загрузите вертикальное видео 9:16";
+    ? t("Безопасный режим сохранён; загрузите видео для расчёта")
+    : t("Загрузите вертикальное видео 9:16");
   else if (!hasActiveGuide) snapHint = safeActive
-    ? `Безопасный отступ ${effectiveMargin} px; включите зону для проверки`
-    : "Включите безопасную зону под предпросмотром";
-  else if (style.position === "center") snapHint = "Для позиции «Центр» отступ не применяется";
-  else if (wrongFormat) snapHint = "Привязка доступна для видео 9:16";
-  else if (safeActive) snapHint = `Безопасный отступ ${effectiveMargin} px; пересчитывается для каждого файла`;
-  else snapHint = "Учтёт плашку, обводку и тень";
+    ? t("Безопасный отступ {px} px; включите зону для проверки", { px: effectiveMargin })
+    : t("Включите безопасную зону под предпросмотром");
+  else if (style.position === "center") snapHint = t("Для позиции «Центр» отступ не применяется");
+  else if (wrongFormat) snapHint = t("Привязка доступна для видео 9:16");
+  else if (safeActive) snapHint = t("Безопасный отступ {px} px; пересчитывается для каждого файла", { px: effectiveMargin });
+  else snapHint = t("Учтёт плашку, обводку и тень");
   $("safeZoneSnapHint").textContent = snapHint;
 }
 
@@ -1011,8 +1015,8 @@ function renderFontOptions() {
   const visible = fontCatalog.filter((f) => matches(f) || f.path === style.font);
 
   const groups = [
-    ["Из комплекта", visible.filter((f) => f.source === "bundled")],
-    ["Системные", visible.filter((f) => f.source === "system")],
+    [t("Из комплекта"), visible.filter((f) => f.source === "bundled")],
+    [t("Системные"), visible.filter((f) => f.source === "system")],
   ];
 
   select.innerHTML = "";
@@ -1023,7 +1027,7 @@ function renderFontOptions() {
     items.forEach((f) => {
       const opt = document.createElement("option");
       opt.value = f.path;
-      opt.textContent = f.cyrillic ? f.label : `${f.label} (без кириллицы)`;
+      opt.textContent = f.cyrillic ? f.label : t("{name} (без кириллицы)", { name: f.label });
       // System names only here - loading a file per option would fetch
       // hundreds of fonts just to draw the dropdown.
       opt.style.fontFamily = (f.css_stack && f.css_stack.length ? f.css_stack : [f.css_family])
@@ -1037,7 +1041,7 @@ function renderFontOptions() {
 
   if (!visible.length) {
     const opt = document.createElement("option");
-    opt.textContent = "ничего не найдено";
+    opt.textContent = t("ничего не найдено");
     opt.disabled = true;
     select.appendChild(opt);
   }
@@ -1081,7 +1085,7 @@ function renderPresetGrid() {
     card.innerHTML = `
       <div class="preset-thumb"><span class="preset-sample">Аа</span></div>
       <div class="preset-name">${p.name || p.filename}</div>
-      <button class="preset-del" title="Удалить пресет">×</button>
+      <button class="preset-del" title="${t("Удалить пресет")}">×</button>
     `;
 
     // Styled through the DOM, not inside the markup: font stacks contain
@@ -1132,7 +1136,7 @@ async function deletePreset(preset, card) {
       c.querySelector(".preset-del").textContent = "×";
     });
     card.classList.add("confirm-delete");
-    button.textContent = "Удалить?";
+    button.textContent = t("Удалить?");
     setTimeout(() => {
       card.classList.remove("confirm-delete");
       button.textContent = "×";
@@ -1144,7 +1148,7 @@ async function deletePreset(preset, card) {
   if (result && result.ok) {
     await loadPresets();
   } else {
-    showToast("Не удалось удалить пресет: " + ((result && result.error) || "неизвестная ошибка"));
+    showToast(t("Не удалось удалить пресет: ") + t((result && result.error) || "неизвестная ошибка"));
   }
 }
 
@@ -1226,7 +1230,10 @@ function updateTextBox(stage, line, scale, videoWidth, positionMargin) {
   $("textBoxSize").textContent = `${srcW} × ${srcH}`;
 }
 
-const PREVIEW_SAMPLE = ["ЭТО", "ПРИМЕР", "СУБТИТРОВ", "НА", "ВИДЕО"];
+// The sample line in the preview when no file is selected. Translated at use
+// time so switching the language redraws it.
+const PREVIEW_SAMPLE_SOURCE = ["ЭТО", "ПРИМЕР", "СУБТИТРОВ", "НА", "ВИДЕО"];
+const previewSampleWords = () => PREVIEW_SAMPLE_SOURCE.map((word) => t(word));
 
 // Drops trailing sample words until the block fits within line_count lines,
 // mirroring how the renderer packs words into a caption instead of wrapping
@@ -1287,14 +1294,57 @@ async function openProjectLink(key) {
 
 async function openCacheFolder() {
   const result = await api().open_cache_folder();
-  if (!result || !result.ok) showToast("Не удалось открыть папку кэша");
+  if (!result || !result.ok) showToast(t("Не удалось открыть папку кэша"));
 }
 
 async function refreshAppInfo() {
   try {
     const info = await api().app_info();
     if (info && info.version) $("appVersion").textContent = "v" + info.version;
+    const saved = info && info.settings && info.settings.lang;
+    if (saved) applyLanguage(saved, { save: false });
   } catch (e) { /* the header simply stays without a version */ }
+}
+
+// ---------------- interface language ----------------
+
+// Everything the dictionary cannot reach by walking the DOM: text this file
+// and workspace.js write themselves. Switching redraws it all in place, so
+// nothing has to be restarted.
+function redrawTranslatedText() {
+  TITLE_SLOTS.forEach((i) => {
+    const panel = $(`titlePanel${i}`);
+    if (panel) window.I18n.apply(panel);
+  });
+  renderFontOptions();
+  renderPresetGrid();
+  updateCaptionModeHint();
+  renderSafeZones();
+  updatePreview();
+  refreshCacheBadge();
+  updateModelHint();
+  refreshGpuBadge();
+  if (typeof redrawWorkspaceText === "function") redrawWorkspaceText();
+}
+
+function applyLanguage(code, options) {
+  const switcher = $("langSwitch");
+  if (switcher) {
+    switcher.querySelectorAll("button").forEach((button) =>
+      button.classList.toggle("active", button.dataset.lang === code));
+  }
+  const changed = window.I18n.setLang(code, { silent: true });
+  if (changed) redrawTranslatedText();
+  if (options && options.save === false) return;
+  try { api().set_setting("lang", code); } catch (e) { /* стоит и без сохранения */ }
+}
+
+function setupLanguageSwitch() {
+  const switcher = $("langSwitch");
+  if (!switcher) return;
+  switcher.querySelectorAll("button").forEach((button) => {
+    button.addEventListener("click", () => applyLanguage(button.dataset.lang));
+  });
 }
 
 // How much disk the cache takes, next to the GPU badge.
@@ -1310,7 +1360,7 @@ async function checkUpdates(byUser) {
   const previous = btn.textContent;
   if (byUser) {
     btn.classList.add("checking");
-    btn.textContent = "Проверяю…";
+    btn.textContent = t("Проверяю…");
   }
   let result = null;
   try {
@@ -1322,37 +1372,50 @@ async function checkUpdates(byUser) {
 
   if (result && result.ok && result.update_available) {
     updateReady = true;
-    btn.textContent = "Доступна " + result.latest + " ↗";
+    btn.textContent = t("Доступна {version} ↗", { version: result.latest });
     btn.classList.add("update-ready");
     btn.title = (result.notes ? result.notes + "\n" : "")
-      + "Нажмите, чтобы открыть репозиторий. Обновление — распаковать архив поверх папки.";
+      + t("Нажмите, чтобы открыть репозиторий. Обновление — распаковать архив поверх папки.");
     return result;
   }
 
   btn.textContent = previous;
   if (!byUser) return result;
   if (result && result.ok) {
-    btn.textContent = "Версия актуальна";
-    showToast("У вас последняя версия — " + result.current);
+    btn.textContent = t("Версия актуальна");
+    showToast(t("У вас последняя версия — {version}", { version: result.current }));
   } else {
-    showToast("Не удалось проверить обновления: " + ((result && result.error) || "нет связи"));
+    showToast(t("Не удалось проверить обновления: ") + t((result && result.error) || "нет связи"));
   }
-  setTimeout(() => { if (!updateReady) btn.textContent = "Check updates ↗"; }, 4000);
+  setTimeout(() => { if (!updateReady) btn.textContent = t("Check updates ↗"); }, 4000);
   return result;
+}
+
+// The unit belongs to the interface language, so the badge is built here and
+// not taken from the Python side ready-made.
+const SIZE_UNITS = ["Б", "КБ", "МБ", "ГБ"];
+
+function humanSize(bytes) {
+  let value = Number(bytes) || 0;
+  let unit = 0;
+  while (value >= 1024 && unit < SIZE_UNITS.length - 1) { value /= 1024; unit++; }
+  const digits = unit >= 2 ? 1 : 0;
+  return `${value.toFixed(digits)} ${t(SIZE_UNITS[unit])}`;
 }
 
 async function refreshCacheBadge() {
   try {
     const usage = await api().cache_usage();
     if (!usage) return;
-    $("cacheBadge").textContent = "Кэш " + usage.text;
-    $("cacheBadge").title = `${usage.files} файлов в папке cache — нажмите, чтобы открыть`;
+    $("cacheBadge").textContent = t("Кэш ")
+      + (usage.bytes === undefined ? usage.text : humanSize(usage.bytes));
+    $("cacheBadge").title = t("Файлов в папке cache: {n} — нажмите, чтобы открыть", { n: usage.files });
   } catch (e) { /* leave the dash */ }
 }
 
 window.onPipelineError = function (message) {
-  setProgress("Ошибка", null);
-  showToast("Ошибка: " + message);
+  setProgress(t("Ошибка"), null);
+  showToast(t("Ошибка: ") + t(message));
 };
 
 async function openOutput() {
@@ -1394,10 +1457,10 @@ function updateModelHint() {
   const size = $("modelSize").value;
   const hint = $("modelHint");
   if (modelsCached[size]) {
-    hint.textContent = "Модель уже скачана — начнём сразу.";
+    hint.textContent = t("Модель уже скачана — начнём сразу.");
     hint.style.color = "";
   } else {
-    hint.textContent = `Модель ещё не скачана: при запуске загрузится ${MODEL_SIZES[size] || ""} (разово).`;
+    hint.textContent = t("Модель ещё не скачана: при запуске загрузится {size} (разово).", { size: t(MODEL_SIZES[size] || "") });
     hint.style.color = "var(--accent)";
   }
 }
@@ -1413,14 +1476,14 @@ async function refreshGpuBadge() {
   };
   try {
     const info = await api().get_gpu_info();
-    if (!info.name) return paint("CPU режим", IDLE);
+    if (!info.name) return paint(t("CPU режим"), IDLE);
     // A detected card is not a usable card: without the CUDA libraries, or on
     // a card whose compute types the model cannot use, the run lands on the
     // processor anyway. Green over CPU-speed work is what hid that.
     if (info.usable) return paint(`${info.name} · ${info.compute_type}`, "var(--good)");
-    paint(`${info.name} — CPU режим`, "var(--warn)", info.reason);
+    paint(t("{name} — CPU режим", { name: info.name }), "var(--warn)", t(info.reason || ""));
   } catch (e) {
-    paint("CPU режим", IDLE);
+    paint(t("CPU режим"), IDLE);
   }
 }
 
@@ -1428,6 +1491,7 @@ async function refreshGpuBadge() {
 
 function init() {
   setupBindings();
+  setupLanguageSwitch();
   if (typeof initWorkspace === "function") initWorkspace();
   applyStyleToControls();
   applyStageGeometry();

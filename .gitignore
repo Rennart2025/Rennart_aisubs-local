@@ -31,3 +31,6 @@ __pycache__/
 .idea/
 Thumbs.db
 desktop.ini
+
+# Interface preferences (language) — local, not part of the project
+settings.json

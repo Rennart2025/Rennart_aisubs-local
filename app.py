@@ -30,7 +30,7 @@ from lib.transcript_revisions import RevisionConflict, TranscriptError
 PRESETS_DIR = os.path.join(BASE_DIR, "presets")
 OUTPUT_DIR = os.path.join(BASE_DIR, "output")
 REVISIONS_DIR = os.path.join(BASE_DIR, "cache", "revisions")
-APP_VERSION = "1.2.2"
+APP_VERSION = "1.3.0"
 CREATOR_CHANNEL_URL = "https://t.me/daipotestit"
 CACHE_DIR = os.path.join(BASE_DIR, "cache")
 
@@ -42,6 +42,23 @@ LINKS = {
     "page": "https://rennart2025.github.io/Rennart_aisubs-local/",
 }
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+# Window preferences, kept next to the program and out of the repository, so
+# unpacking an update over the folder never resets them.
+SETTINGS_PATH = os.path.join(BASE_DIR, "settings.json")
+ALLOWED_SETTINGS = {"lang"}
+
+
+def _load_settings():
+    try:
+        with open(SETTINGS_PATH, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {k: v for k, v in data.items() if k in ALLOWED_SETTINGS}
+
 
 def _human_size(num):
     for unit in ("Б", "КБ", "МБ", "ГБ"):
@@ -244,8 +261,27 @@ class Api:
         return True
 
     def app_info(self):
-        """Version and the links shown in the header."""
-        return {"version": APP_VERSION, "links": dict(LINKS)}
+        """Version, links and the saved preferences the header needs."""
+        return {"version": APP_VERSION, "links": dict(LINKS),
+                "settings": _load_settings()}
+
+    def set_setting(self, key, value):
+        """Saves one interface preference (currently just the language).
+
+        Kept out of the presets: this is about the window, not about how the
+        subtitles look.
+        """
+        key = str(key)
+        if key not in ALLOWED_SETTINGS:
+            return {"ok": False, "error": "неизвестная настройка"}
+        settings = _load_settings()
+        settings[key] = value
+        try:
+            with open(SETTINGS_PATH, "w", encoding="utf-8") as handle:
+                json.dump(settings, handle, ensure_ascii=False, indent=2)
+        except OSError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "settings": settings}
 
     def check_updates(self):
         """Compares this build with version.json on GitHub.

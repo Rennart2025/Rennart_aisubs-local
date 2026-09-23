@@ -1,5 +1,68 @@
 ![Главный экран AISubs: список видео, предпросмотр, редактор текста и настройки стиля](docs/screen-main.png)
 
+<details>
+<summary><b>English — short version</b> (click to expand · полное описание ниже, на русском)</summary>
+
+## AISubs — burned-in subtitles with word highlighting
+
+A desktop app for Windows. It transcribes the speech in a video, lets you fix
+every word and its timing, and burns the subtitles into the file with the
+spoken word highlighted — as phrases, one sentence at a time, or one word at
+a time.
+
+Everything runs on your own machine: the video, the audio and the text never
+leave it. No account, no API key, no subscription. The internet is needed for
+the installation and for the one-time model download.
+
+**What it does**
+
+- **Speech recognition** — Whisper with per-word timestamps, models from
+  `base` to `large-v3`, automatic language detection, NVIDIA GPU with a
+  fallback to the processor.
+- **Word editor** — the text sits next to the preview. Clicking a word moves
+  the video to it. Uncertain words are outlined yellow, timing errors red.
+- **Three grouping modes** — phrases by block width, sentences without full
+  stops, or one word at a time without punctuation.
+- **Subtitle style** — any font on the system, a plate under the spoken word
+  or a karaoke colour, outline, line spacing and two independent shadows.
+- **Two titles over the video** — each with its own timing, style, horizontal
+  shift and arrival/departure animation (fade, slide from any side, zoom,
+  blur dissolve).
+- **Safe zones** of TikTok, Reels and Shorts drawn over the preview, with a
+  button that sets the margin so the text fits inside the zone.
+- **Batch work** — several clips in one list, each with its own state. A
+  failed file does not stop the rest, and the list survives a restart.
+- **Interface language** — Russian or English, switched in the header next to
+  the cache badge; the choice is remembered.
+
+**Installation**
+
+```bash
+git clone https://github.com/Rennart2025/Rennart_aisubs-local.git
+cd Rennart_aisubs-local
+setup.bat
+run.bat
+```
+
+`setup.bat` downloads a portable Python, ffmpeg and the recognition model
+into the program folder; the Python installed on your system is left alone.
+Then `run.bat` starts the window. Requirements: Windows 10 or 11 (64-bit),
+about 5 GB of disk space, and an NVIDIA GPU if you want speed — without one
+the recognition runs on the processor.
+
+**How to use it**
+
+Drop videos into the window → **Transcribe** → fix the text and timings if
+needed → set the style → **Render**. The results land in `output/`. Edits save
+themselves; every transcription keeps its previous versions.
+
+Based on [AISubs](https://github.com/jimmorisedu-boop/aisubs-local) by
+[@daipotestit](https://t.me/daipotestit), MIT licence. This version:
+[Rennart](https://t.me/rinatmaksutov) ·
+[project page](https://rennart2025.github.io/Rennart_aisubs-local/).
+
+</details>
+
 # AISubs — субтитры с пословной подсветкой
 
 Настольная программа для Windows: распознаёт речь в видео, даёт поправить
@@ -149,6 +212,25 @@ API-ключ и подписка не нужны. Интернет нужен т
   анимацию.
 
 <br clear="all">
+
+## Язык интерфейса
+
+Переключатель **RU / EN** в шапке, рядом с размером кэша. Язык меняется сразу,
+без перезапуска, и запоминается в файле `settings.json` рядом с программой —
+этот файл в архив обновления не входит, так что настройка переживает
+обновление.
+
+Перевод лежит в `gui/i18n/en.js`: обычный словарь, где ключ — русская строка,
+а значение — английская. Строка без перевода просто остаётся русской, поэтому
+словарь можно дополнять по частям. Чтобы добавить третий язык, скопируйте этот
+файл, переведите правые части, зарегистрируйте под своим кодом
+(`I18n.register("de", "Deutsch", dict)`), подключите `<script>` в
+`gui/index.html` и добавьте кнопку в переключатель.
+
+Тесты `tests/i18n.test.js` проверяют, что каждая строка интерфейса есть в
+словаре, что подстановки вроде `{n}` совпадают с обеих сторон и что в словаре
+нет лишних ключей — то есть английский интерфейс не может «отстать» от
+русского незаметно.
 
 ## Пресеты
 

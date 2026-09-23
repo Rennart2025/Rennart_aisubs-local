@@ -1,0 +1,360 @@
+// English interface.
+//
+// The key is the Russian original, exactly as it stands in the markup or in
+// the code. A string missing here simply stays Russian, so a half-finished
+// translation never breaks the window. Braces are placeholders filled at
+// runtime: keep {n}, {name} and friends spelled the same on both sides.
+//
+// Adding another language: copy this file, translate the right-hand side,
+// register it under its own code and add a button to #langSwitch.
+(function (root) {
+  const dict = {
+
+    // ---------------- header ----------------
+    "локальные субтитры с подсветкой слов": "local subtitles with word highlighting",
+    "Страница программы ↗": "Project page ↗",
+    "Check updates ↗": "Check updates ↗",
+    "Открыть канал автора исходного проекта в Telegram": "Open the original author's Telegram channel",
+    "Открыть Telegram автора этой версии": "Open the Telegram of this version's author",
+    "Открыть страницу программы": "Open the project page",
+    "Проверить, вышла ли новая версия": "Check whether a newer version is out",
+    "Язык интерфейса": "Interface language",
+    "Русский интерфейс": "Russian interface",
+    "Кэш ": "Cache ",
+    "Кэш —": "Cache —",
+    "Б": "B",
+    "КБ": "KB",
+    "МБ": "MB",
+    "ГБ": "GB",
+    "Открыть папку кэша": "Open the cache folder",
+    "Файлов в папке cache: {n} — нажмите, чтобы открыть": "Files in the cache folder: {n} — click to open",
+    "Не удалось открыть папку кэша": "Could not open the cache folder",
+    "определение GPU...": "detecting GPU…",
+    "CPU режим": "CPU mode",
+    "{name} — CPU режим": "{name} — CPU mode",
+    "Проверяю…": "Checking…",
+    "Доступна {version} ↗": "Version {version} available ↗",
+    "Нажмите, чтобы открыть репозиторий. Обновление — распаковать архив поверх папки.":
+      "Click to open the repository. To update, unpack the archive over the program folder.",
+    "Версия актуальна": "Up to date",
+    "У вас последняя версия — {version}": "You have the latest version — {version}",
+    "Не удалось проверить обновления: ": "Could not check for updates: ",
+    "нет связи": "no connection",
+    "Не удалось открыть {what}: {why}": "Could not open {what}: {why}",
+    "репозиторий проекта": "the project repository",
+    "страницу программы": "the project page",
+    "ссылку": "the link",
+    "неизвестная ошибка": "unknown error",
+    "ошибка": "error",
+
+    // ---------------- video column ----------------
+    "Видео": "Videos",
+    "Перетащите видео сюда": "Drop videos here",
+    "или нажмите, чтобы выбрать — можно сразу несколько":
+      "or click to choose — several at once is fine",
+    "Отпустите — добавим в очередь": "Release to add them to the list",
+    "видео файлы: mp4, mov, mkv, avi, webm": "video files: mp4, mov, mkv, avi, webm",
+    "+ Добавить видео": "+ Add videos",
+    "Очистить": "Clear",
+    "Точно?": "Sure?",
+    "Убрать все файлы из списка (сами видео не удаляются)":
+      "Remove every file from the list (the videos themselves stay on disk)",
+    "Убрать из списка (файл на диске останется)":
+      "Remove from the list (the file stays on disk)",
+    "Не удалось убрать: ": "Could not remove: ",
+    "Не удалось добавить: {why}": "Could not add: {why}",
+    "Эти файлы уже в списке": "Those files are already in the list",
+    "Дождитесь окончания обработки или остановите её":
+      "Wait for the current run to finish, or stop it",
+    "Дождитесь окончания текущей обработки": "Wait for the current run to finish",
+
+    // recognition settings
+    "Распознавание речи": "Speech recognition",
+    "Модель Whisper": "Whisper model",
+    "large-v3 — максимальное качество": "large-v3 — best quality",
+    "distil-large-v3 — быстрее, почти так же точно": "distil-large-v3 — faster, nearly as accurate",
+    "medium — баланс": "medium — balanced",
+    "small — быстро": "small — fast",
+    "base — черновой вариант": "base — rough draft",
+    "Модель уже скачана — начнём сразу.": "The model is already downloaded — we start right away.",
+    "Модель ещё не скачана: при запуске загрузится {size} (разово).":
+      "The model is not downloaded yet: {size} will be fetched once at the first run.",
+    "~3 ГБ": "~3 GB",
+    "~1.5 ГБ": "~1.5 GB",
+    "~500 МБ": "~500 MB",
+    "~150 МБ": "~150 MB",
+    "Язык": "Language",
+    "Автоопределение": "Detect automatically",
+    "Русский": "Russian",
+    "Українська": "Ukrainian",
+    "Устройство": "Device",
+    "Авто (GPU, иначе CPU)": "Auto (GPU, else CPU)",
+    "Только GPU (CUDA)": "GPU only (CUDA)",
+    "Только CPU": "CPU only",
+
+    // file statuses
+    "Текст не распознан": "Not transcribed yet",
+    "В очереди": "Queued",
+    "Распознаётся": "Transcribing",
+    "Текст готов — проверьте": "Text ready — please check",
+    "Текст готов": "Text ready",
+    "Есть правки, не отрендерено": "Edited, not rendered",
+    "Рендер": "Rendering",
+    "Готово": "Done",
+    "Ошибка распознавания": "Recognition failed",
+    "Ошибка рендера": "Render failed",
+    "Речь не найдена": "No speech found",
+    "Остановлено": "Stopped",
+
+    // ---------------- preview ----------------
+    "Предпросмотр": "Preview",
+    "Добавьте видео — здесь будет кадр": "Add a video — the frame appears here",
+    "с субтитрами в выбранном стиле": "with subtitles in the chosen style",
+    "Добавьте видео — здесь будет кадр<br>с субтитрами в выбранном стиле":
+      "Add a video — the frame appears here<br>with subtitles in the chosen style",
+    "Исходный файл не найден: ": "Source file not found: ",
+    "Исходник": "Source",
+    "Результат": "Result",
+    "Появится после рендера": "Appears after rendering",
+    "Воспроизвести": "Play",
+    "Пауза": "Pause",
+    "Позиция в видео": "Position in the video",
+    "Безопасные зоны": "Safe zones",
+    "Безопасные зоны социальных сетей": "Safe zones of social networks",
+    "Разметка только для предпросмотра, в видео не попадает":
+      "Guides for the preview only — they never reach the video",
+    "Разметка рассчитана на вертикальное видео 9:16": "The guides assume vertical 9:16 video",
+    "Пресеты": "Presets",
+    "Сохранить": "Save",
+    "название своего стиля": "name your style",
+    "Название для сохранения": "Name to save under",
+    "Удалить пресет": "Delete preset",
+    "Аа": "Aa",
+    "Удалить?": "Delete?",
+    "Не удалось удалить пресет: ": "Could not delete the preset: ",
+    "ЭТО": "THIS",
+    "ПРИМЕР": "IS A",
+    "СУБТИТРОВ": "SAMPLE",
+    "НА": "OF",
+    "ВИДЕО": "SUBTITLES",
+
+    // ---------------- text column ----------------
+    "Текст": "Text",
+    "Выберите видео в списке слева.": "Pick a video in the list on the left.",
+    "Добавьте видео слева.": "Add videos on the left.",
+    "Потом нажмите": "Then press",
+    "— здесь появится распознанный текст.": "— the recognised text shows up here.",
+    "Добавьте видео слева.<br>Потом нажмите <b>Transcribe</b> — здесь появится распознанный текст.":
+      "Add videos on the left.<br>Then press <b>Transcribe</b> — the recognised text shows up here.",
+    "Распознаём речь…{pct}<br><small>Текст появится здесь, как только файл будет готов.</small>":
+      "Transcribing…{pct}<br><small>The text appears here as soon as the file is done.</small>",
+    "Текст для этого видео ещё не распознан.<br>Нажмите <b>Transcribe</b> внизу — распознаются все новые файлы.":
+      "This video has no text yet.<br>Press <b>Transcribe</b> below — every new file gets transcribed.",
+    "Распознать только этот файл": "Transcribe this file only",
+    "Не удалось распознать:<br><small>{why}</small>": "Could not transcribe:<br><small>{why}</small>",
+    "Попробовать ещё раз": "Try again",
+    "В этом видео речь не найдена.<br><small>Можно попробовать другую модель или указать язык.</small>":
+      "No speech was found in this video.<br><small>Try another model, or set the language.</small>",
+    "Загружаем текст…": "Loading the text…",
+    "Заголовки": "Titles",
+    "текст поверх видео · двойной клик по времени — взять с плеера":
+      "text over the video · double-click a time field to take it from the player",
+    "Заголовок 1 — например, тема ролика": "Title 1 — the topic of the clip, say",
+    "Заголовок 2 — появится позже": "Title 2 — shows up later",
+    "Текст заголовка 1": "Text of title 1",
+    "Текст заголовка 2": "Text of title 2",
+    "Начало заголовка 1, секунды": "Start of title 1, seconds",
+    "Конец заголовка 1, секунды": "End of title 1, seconds",
+    "Начало заголовка 2, секунды": "Start of title 2, seconds",
+    "Конец заголовка 2, секунды": "End of title 2, seconds",
+    "Заголовки не сохранены: {why}": "Titles not saved: {why}",
+    "Слово": "Word",
+    "Начало, с": "Start, s",
+    "Конец, с": "End, s",
+    "Начало слова, секунды": "Word start, seconds",
+    "Конец слова, секунды": "Word end, seconds",
+    "Вернуть слово": "Restore the word",
+    "Удалить слово": "Delete the word",
+    "Вставить слово после": "Insert a word after this one",
+    "Новое слово:": "New word:",
+    "Распознать заново": "Transcribe again",
+    "Новая версия текста с текущими настройками распознавания":
+      "A new version of the text with the current recognition settings",
+    "Распознаём заново; прошлая версия текста сохранена в истории":
+      "Transcribing again; the previous version is kept in the history",
+    "Открыть результат": "Open the result",
+    "Открыть папку": "Open the folder",
+    "Enter — следующее слово · правки сохраняются сами":
+      "Enter — next word · edits save themselves",
+    "есть несохранённые правки": "unsaved edits",
+    "сохраняем…": "saving…",
+    "сохранено": "saved",
+    "не сохранено: ": "not saved: ",
+    "текст изменился — перечитываем": "the text changed — reloading",
+    "отрендерено": "rendered",
+    "Проверьте тайминги: {n} (выделены красным) — с ними рендер не пройдёт":
+      "Check the timings: {n} (marked red) — the render will not run with them",
+    "Низкая уверенность: {n} {word}": "Low confidence: {n} {word}",
+    "слово": "word",
+    "слова": "words",
+    "слов": "words",
+    "Речь не распознана": "No speech recognised",
+    "конец раньше начала": "ends before it starts",
+    "выходит за конец видео": "runs past the end of the video",
+    "наезжает на предыдущее слово": "overlaps the previous word",
+
+    // ---------------- style column ----------------
+    "Настройки стиля": "Style settings",
+    "Субтитры": "Subtitles",
+    "Шрифт": "Font",
+    "поиск по названию…": "search by name…",
+    "Только с кириллицей": "Cyrillic only",
+    "Для русского текста берите шрифт из первой группы — иначе движок подставит запасной.":
+      "For Russian text pick a font from the first group — otherwise the engine substitutes a fallback.",
+    "Из комплекта": "Bundled",
+    "Системные": "System",
+    "{name} (без кириллицы)": "{name} (no Cyrillic)",
+    "ничего не найдено": "nothing found",
+    "Размер шрифта": "Font size",
+    "Регистр": "Letter case",
+    "ЗАГЛАВНЫЕ": "UPPERCASE",
+    "строчные": "lowercase",
+    "Как есть": "As recognised",
+    "Разбивка текста": "Text grouping",
+    "Фразы": "Phrases",
+    "Предложения": "Sentences",
+    "По слову": "One word",
+    "Слова собираются во фразы по ширине блока, знаки препинания как в тексте.":
+      "Words are packed into phrases by block width; punctuation stays as in the text.",
+    "Без точек; каждое новое предложение начинается с новой строки.":
+      "No full stops; every sentence starts a new caption.",
+    "По одному слову, без знаков препинания и кавычек. Слово держится до следующего.":
+      "One word at a time, without punctuation or quotes. A word holds until the next one.",
+    "Цвет текста": "Text colour",
+    "Обводка": "Outline",
+    "Тень": "Shadow",
+    "Тень 2": "Shadow 2",
+    "Размытие": "Blur",
+    "Прозрачность": "Opacity",
+    "Тип выделения слова": "Word highlight",
+    "Статичный эффект": "Static effect",
+    "Плашка рисуется под каждой строкой заголовка.": "The plate is drawn under every line of the title.",
+    "Плашка": "Plate",
+    "Цвет": "Colour",
+    "Без": "None",
+    "Цвет плашки": "Plate colour",
+    "Цвет текста на плашке": "Text colour on the plate",
+    "Цвет активного слова": "Colour of the active word",
+    "Цвет текста заголовка": "Title text colour",
+    "Скругление": "Corner radius",
+    "Отступ X": "Padding X",
+    "Отступ Y": "Padding Y",
+    "Позиция": "Position",
+    "Верх": "Top",
+    "Центр": "Centre",
+    "Низ": "Bottom",
+    "Отступ от края": "Margin from the edge",
+    "По зоне": "Fit zone",
+    "Строк максимум": "Lines at most",
+    "Межстрочный интервал": "Line spacing",
+    "Расстояние между строками в долях высоты строки. Виден только на тексте в две строки и больше.":
+      "The gap between lines, as a share of the line height. Visible on two lines or more.",
+    "Ширина блока": "Block width",
+    "Сдвиг влево / вправо": "Shift left / right",
+    "0 — по центру кадра, минус влево, плюс вправо. За край кадра заголовок не уедет: сдвиг останавливается у границы.":
+      "0 is the centre of the frame, minus is left, plus is right. A title never leaves the frame: the shift stops at the edge.",
+    "Включите безопасную зону под предпросмотром": "Turn on a safe zone under the preview",
+    "Безопасный режим сохранён; загрузите видео для расчёта":
+      "Safe mode is kept; load a video to compute it",
+    "Загрузите вертикальное видео 9:16": "Load a vertical 9:16 video",
+    "Безопасный отступ {px} px; включите зону для проверки":
+      "Safe margin {px} px; turn the zone on to check it",
+    "Безопасный отступ {px} px; пересчитывается для каждого файла":
+      "Safe margin {px} px; recomputed for every file",
+    "Для позиции «Центр» отступ не применяется": "The margin does not apply to the centre position",
+    "Привязка доступна для видео 9:16": "Fitting is available for 9:16 video",
+    "Учтёт плашку, обводку и тень": "Accounts for the plate, the outline and the shadow",
+    "Анимация появления": "Word animation",
+    "Нет": "None",
+    "Плавно": "Fade",
+    "Подскок": "Pop",
+    "Снизу": "From below",
+    "Так появляется каждая новая реплика. В режиме «По слову» — каждое слово.":
+      "How every new caption arrives. In the one-word mode — every word.",
+    "Длительность, мс": "Duration, ms",
+
+    // titles panel
+    "Заголовок 1": "Title 1",
+    "Заголовок 2": "Title 2",
+    "Текст и тайминги — в колонке «Текст». Регистр, разбивка и число строк здесь не нужны: текст вписывается в блок сам.":
+      "Text and timings live in the Text column. Case, grouping and line count are not needed here: the text fits itself into the block.",
+    "Fade in — появление": "Fade in — arrival",
+    "Fade out — исчезание": "Fade out — departure",
+    "Появление и исчезание никогда не занимают больше половины времени заголовка.":
+      "Arrival and departure never take more than half of the title's time.",
+    "Слева": "From the left",
+    "Справа": "From the right",
+    "Сверху": "From above",
+    "Приближение": "Zoom in",
+    "Из размытия": "Out of blur",
+    "Влево": "To the left",
+    "Вправо": "To the right",
+    "Вверх": "Upwards",
+    "Вниз": "Downwards",
+    "Отдаление": "Zoom out",
+    "В размытие": "Into blur",
+
+    // ---------------- bottom bar ----------------
+    "Добавьте видео": "Add videos",
+    "Готово к работе": "Ready",
+    "Подготовка…": "Preparing…",
+    "Распознавание": "Transcribing",
+    " · ещё в очереди: {n}": " · still queued: {n}",
+    "Распознать речь во всех файлах, где текста ещё нет":
+      "Transcribe every file that has no text yet",
+    "Все файлы уже распознаны": "Every file is transcribed already",
+    "Отрендерить выбранный файл ещё раз с текущим стилем":
+      "Render the selected file again with the current style",
+    "Вшить субтитры во все файлы с готовым текстом":
+      "Burn subtitles into every file whose text is ready",
+    "ждут распознавания: {n}": "waiting to be transcribed: {n}",
+    "готовы к рендеру: {n}": "ready to render: {n}",
+    "готово: {n}": "done: {n}",
+    "Ждём распознавание: {n}": "Waiting for transcription: {n}",
+    "Одобрите хотя бы один файл": "Approve at least one file",
+    "Рендер одобренных ({n})": "Render approved ({n})",
+    "Остановить после файла": "Stop after this file",
+    "Останавливаем после файла…": "Stopping after this file…",
+    "Текущий файл доделается, остальные будут остановлены":
+      "The current file finishes, the rest are dropped",
+    "Распознавание не запущено": "Transcription did not start",
+    "Рендер не запущен": "Rendering did not start",
+    "Есть ошибки в таймингах, эти файлы не отрендерятся: ":
+      "Timing errors — these files will not render: ",
+    "Рендер: готово {done}": "Render: {done} done",
+    ", ошибок {failed}": ", {failed} failed",
+    "Ошибка": "Error",
+    "Ошибка: ": "Error: ",
+
+    // progress stages
+    "Скачивание модели (разово)...": "Downloading the model (once)…",
+    "Загрузка модели распознавания...": "Loading the recognition model…",
+    "Распознавание речи...": "Recognising speech…",
+    "Подготовка рендера...": "Preparing the render…",
+    "Построение субтитров...": "Building the subtitles…",
+    "Сборка видео слоёв...": "Compositing the video layers…",
+    "Рендер видео...": "Rendering the video…",
+
+    // ---------------- messages from the Python side ----------------
+    "неизвестная ссылка": "unknown link",
+    "неизвестная настройка": "unknown setting",
+    "Не удалось открыть браузер": "Could not open the browser",
+    "нет связи с GitHub: ": "no connection to GitHub: ",
+    "не удалось проверить: ": "could not check: ",
+    "непонятный ответ: ": "unreadable answer: ",
+    "в version.json нет номера версии": "version.json carries no version number",
+  };
+
+  if (root.I18n) root.I18n.register("en", "English", dict);
+  else root.I18N_EN = dict;
+})(typeof globalThis !== "undefined" ? globalThis : this);
