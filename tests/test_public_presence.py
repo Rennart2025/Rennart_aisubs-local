@@ -53,6 +53,15 @@ class ScreenshotTests(unittest.TestCase):
         self.assertGreater(width, height, "ожидается снимок окна целиком")
 
 
+    def test_the_panel_screenshots_are_present(self):
+        for name in ("screen-editor.png", "screen-style.png",
+                     "screen-titles.png", "result-frame.png"):
+            shot = ROOT / "docs" / name
+            self.assertTrue(shot.is_file(), name)
+            self.assertGreater(shot.stat().st_size, 20_000, name)
+            png_dimensions(shot)
+
+
 class GitHubPagesTests(unittest.TestCase):
     """docs/index.html is the project page; it must stand on its own."""
 
@@ -85,6 +94,11 @@ class GitHubPagesTests(unittest.TestCase):
             if src and not src.startswith(("http://", "https://", "/")):
                 self.assertTrue((self.path.parent / src).is_file(), src)
 
+    def test_thumbnails_open_the_full_size_screenshot(self):
+        """Панели сняты узкими и высокими — превью подрезано, полный размер по клику."""
+        for name in ("screen-editor.png", "screen-style.png", "screen-titles.png"):
+            self.assertIn(name, self.parser.links, name)
+
     def test_page_loads_nothing_from_the_internet(self):
         """A project page that fetches fonts or scripts breaks without them."""
         self.assertEqual([], self.parser.external_runtime_assets)
@@ -114,10 +128,18 @@ class ReadmeTests(unittest.TestCase):
         self.assertTrue((self.path.parent / images[0]).is_file(), images[0])
 
     def test_readme_relative_images_resolve(self):
-        for target in re.findall(r"!\[[^]]*\]\(([^)]+)\)", self.markdown):
+        targets = re.findall(r"!\[[^]]*\]\(([^)]+)\)", self.markdown)
+        targets += re.findall(r'<img[^>]*\ssrc="([^"]+)"', self.markdown)
+
+        for target in targets:
             if target.startswith(("http://", "https://", "/")):
                 continue
             self.assertTrue((self.path.parent / target).is_file(), target)
+
+    def test_readme_documents_the_titles_feature(self):
+        self.assertIn("## Заголовки", self.markdown)
+        for phrase in ("Fade in", "Fade out", "Заголовок 2"):
+            self.assertIn(phrase, self.markdown)
 
 
 if __name__ == "__main__":
