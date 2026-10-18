@@ -62,6 +62,25 @@
     "Убрать из списка (файл на диске останется)":
       "Remove from the list (the file stays on disk)",
     "Не удалось убрать: ": "Could not remove: ",
+    "Сохранить проект": "Save project",
+    "Открыть проект": "Open project",
+    "Сохранить список, текст с правками, заголовки и стиль в один файл .aisubs":
+      "Save the list, the edited text, the titles and the style into one .aisubs file",
+    "Открыть сохранённый проект; текущий список будет заменён":
+      "Open a saved project; the current list is replaced",
+    "Открыть проект? Текущий список файлов будет заменён.":
+      "Open a project? The current list of files will be replaced.",
+    "Список пуст — сохранять нечего": "The list is empty — there is nothing to save",
+    "Проект сохранён: {name}": "Project saved: {name}",
+    "Проект открыт: {name}": "Project opened: {name}",
+    "Не удалось сохранить проект: ": "Could not save the project: ",
+    "Не удалось открыть проект: ": "Could not open the project: ",
+    "Не найдены файлы: ": "Files not found: ",
+    "это не файл проекта AISubs": "this is not an AISubs project file",
+    "файл проекта повреждён": "the project file is damaged",
+    "проект сохранён более новой версией программы":
+      "the project was saved by a newer version of the program",
+    "в проекте нет списка видео": "the project has no list of videos",
     "Не удалось добавить: {why}": "Could not add: {why}",
     "Эти файлы уже в списке": "Those files are already in the list",
     "Дождитесь окончания обработки или остановите её":
@@ -129,7 +148,6 @@
     "название своего стиля": "name your style",
     "Название для сохранения": "Name to save under",
     "Удалить пресет": "Delete preset",
-    "Аа": "Aa",
     "Удалить?": "Delete?",
     "Не удалось удалить пресет: ": "Could not delete the preset: ",
     "ЭТО": "THIS",
@@ -160,7 +178,8 @@
     "текст поверх видео · двойной клик по времени — взять с плеера":
       "text over the video · double-click a time field to take it from the player",
     "Заголовок 1 — например, тема ролика": "Title 1 — the topic of the clip, say",
-    "Заголовок 2 — появится позже": "Title 2 — shows up later",
+    "Показывать заголовок 1": "Show title 1",
+    "Показывать заголовок 2": "Show title 2",
     "Текст заголовка 1": "Text of title 1",
     "Текст заголовка 2": "Text of title 2",
     "Начало заголовка 1, секунды": "Start of title 1, seconds",
@@ -178,6 +197,21 @@
     "Вставить слово после": "Insert a word after this one",
     "Новое слово:": "New word:",
     "Распознать заново": "Transcribe again",
+    "Заменить видео": "Replace the video",
+    "Подставить другой видеофайл вместо исходного: текст, тайминги и заголовки остаются":
+      "Put another video file under this one: the text, the timings and the titles stay",
+    "Видео заменено: {name}": "Video replaced: {name}",
+    "Не удалось заменить видео: ": "Could not replace the video: ",
+    "это видео уже есть в списке": "this video is already in the list",
+    "файл не найден: ": "file not found: ",
+    "Текст в файл": "Text to a file",
+    "Сохранить распознанный текст в файл .txt — сплошным текстом, со знаками препинания":
+      "Save the recognised text as a .txt file — running text, with punctuation",
+    "Сначала распознайте текст": "Transcribe the text first",
+    "Не удалось сохранить текст: ": "Could not save the text: ",
+    "Текст сохранён: {name}": "Text saved: {name}",
+    "в этом файле нет распознанного текста": "this file has no recognised text",
+    "файл не найден в списке": "the file is not in the list",
     "Новая версия текста с текущими настройками распознавания":
       "A new version of the text with the current recognition settings",
     "Распознаём заново; прошлая версия текста сохранена в истории":
@@ -230,6 +264,9 @@
       "No full stops; every sentence starts a new caption.",
     "По одному слову, без знаков препинания и кавычек. Слово держится до следующего.":
       "One word at a time, without punctuation or quotes. A word holds until the next one.",
+    "Без точек в конце предложений": "No full stops at the end of sentences",
+    "Убирает только точку в конце: «?» и «!» остаются, дробь «3.5» не трогается.":
+      "Only the full stop goes: \"?\" and \"!\" stay, and a decimal like 3.5 is left alone.",
     "Цвет текста": "Text colour",
     "Обводка": "Outline",
     "Тень": "Shadow",
@@ -257,12 +294,16 @@
     "По зоне": "Fit zone",
     "Строк максимум": "Lines at most",
     "Межстрочный интервал": "Line spacing",
-    "Расстояние между строками в долях высоты строки. Виден только на тексте в две строки и больше.":
-      "The gap between lines, as a share of the line height. Visible on two lines or more.",
+    "Межстрочный": "Line spacing",
+    "Межстрочный интервал — в долях высоты строки, виден на тексте в две строки и больше.":
+      "Line spacing is a share of the line height and shows on two lines or more.",
+    "Цвет обводки": "Outline colour",
     "Ширина блока": "Block width",
     "Сдвиг влево / вправо": "Shift left / right",
-    "0 — по центру кадра, минус влево, плюс вправо. За край кадра заголовок не уедет: сдвиг останавливается у границы.":
-      "0 is the centre of the frame, minus is left, plus is right. A title never leaves the frame: the shift stops at the edge.",
+    "Сдвиг вверх / вниз": "Shift up / down",
+    "Отсчёт от центра кадра: минус — влево и вверх, плюс — вправо и вниз. За край кадра заголовок не уедет: сдвиг останавливается у границы.":
+      "Measured from the centre of the frame: minus is left and up, plus is right and down. A title never leaves the frame: the shift stops at the edge.",
+    "значение": "value",
     "Включите безопасную зону под предпросмотром": "Turn on a safe zone under the preview",
     "Безопасный режим сохранён; загрузите видео для расчёта":
       "Safe mode is kept; load a video to compute it",
@@ -286,6 +327,16 @@
     // titles panel
     "Заголовок 1": "Title 1",
     "Заголовок 2": "Title 2",
+    "Заголовок 3": "Title 3",
+    "Заголовок": "Title",
+    "второй": "second",
+    "текст": "text",
+    "Показывать заголовок 3": "Show title 3",
+    "Текст заголовка 3": "Text of title 3",
+    "Начало заголовка 3, секунды": "Start of title 3, seconds",
+    "Конец заголовка 3, секунды": "End of title 3, seconds",
+    "Заголовок 2 — вторая строка": "Title 2 — second line",
+    "Заголовок 3 — третья строка": "Title 3 — third line",
     "Текст и тайминги — в колонке «Текст». Регистр, разбивка и число строк здесь не нужны: текст вписывается в блок сам.":
       "Text and timings live in the Text column. Case, grouping and line count are not needed here: the text fits itself into the block.",
     "Fade in — появление": "Fade in — arrival",
@@ -323,7 +374,19 @@
     "Ждём распознавание: {n}": "Waiting for transcription: {n}",
     "Одобрите хотя бы один файл": "Approve at least one file",
     "Рендер одобренных ({n})": "Render approved ({n})",
+    "Черновик ½": "Draft ½",
+    "Черновой рендер: половина разрешения и быстрое кодирование. Файл получит имя с «_preview»":
+      "Draft render: half the resolution and fast encoding. The file is named with \"_preview\"",
+    "Черновой рендер: половина разрешения, файл с «_preview»":
+      "Draft render: half the resolution, the file is named with \"_preview\"",
+    "Поставлено в очередь рендера; впереди: {n}": "Queued for rendering; ahead of it: {n}",
+    " · в очереди ещё: {n}": " · still queued: {n}",
     "Остановить после файла": "Stop after this file",
+    "Stop": "Stop",
+    "Останавливаю…": "Stopping…",
+    "Останавливаю текущий файл": "Stopping the current file",
+    "Прервать текущий файл прямо сейчас; недописанное видео не сохраняется":
+      "Interrupt the current file right now; a half-written video is not kept",
     "Останавливаем после файла…": "Stopping after this file…",
     "Текущий файл доделается, остальные будут остановлены":
       "The current file finishes, the rest are dropped",

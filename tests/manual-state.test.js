@@ -181,3 +181,57 @@ test('caption mode falls back to the older sentence_breaks flag', () => {
   assert.equal(ManualState.captionModeOf({ sentence_breaks: true }), 'sentences');
   assert.equal(ManualState.captionModeOf({ caption_mode: 'words', sentence_breaks: true }), 'words');
 });
+
+test("без точек в конце: точка уходит только из того, что рисуется", () => {
+  const words = [
+    { id: "w1", word: " Первое", start: 0, end: 0.4 },
+    { id: "w2", word: " предложение.", start: 0.4, end: 0.9 },
+  ];
+  const captions = ManualState.buildCaptions(words, "phrases", () => true, () => false,
+    { noEndDots: true });
+
+  const one = captions[0].words;
+  assert.equal(one[1].display, "предложение");
+  // Ширина строки считается по тексту с точкой — как в рендере, где точку
+  // убирают уже после разбивки.
+  assert.equal(one[1].text, "предложение.");
+});
+
+test("без точек в конце: «?» и «!» остаются", () => {
+  assert.equal(ManualState.stripEndDot("да?"), "да?");
+  assert.equal(ManualState.stripEndDot("да!"), "да!");
+  assert.equal(ManualState.stripEndDot("3.5"), "3.5");
+  assert.equal(ManualState.stripEndDot("кухни."), "кухни");
+});
+
+test("по умолчанию точки на месте", () => {
+  const words = [{ id: "w1", word: " Конец.", start: 0, end: 0.4 }];
+  const captions = ManualState.buildCaptions(words, "phrases", () => true, () => false);
+
+  assert.equal(captions[0].words[0].display, "Конец.");
+});
+
+test("продолжение слова склеивается в предпросмотре так же, как в рендере", () => {
+  // Whisper разбивает «19-литровой» на два токена: у второго нет пробела.
+  const words = [
+    { id: "w1", word: " к", start: 0, end: 0.3 },
+    { id: "w2", word: " 19", start: 0.3, end: 0.6 },
+    { id: "w3", word: "-литровой", start: 0.6, end: 1.0 },
+  ];
+  const captions = ManualState.buildCaptions(words, "phrases", () => true, () => false);
+
+  assert.equal(captions.length, 1);
+  assert.deepEqual(captions[0].words.map((w) => w.text), ["к", "19-литровой"]);
+  // Клик по любому из склеенных слов должен находить свою фразу.
+  assert.deepEqual(captions[0].words[1].ids, ["w2", "w3"]);
+});
+
+test("обычные слова не склеиваются", () => {
+  const words = [
+    { id: "w1", word: " к", start: 0, end: 0.3 },
+    { id: "w2", word: " бутылке", start: 0.3, end: 0.8 },
+  ];
+  const merged = ManualState.mergeContinuations(words);
+
+  assert.deepEqual(merged.map((w) => w.word), [" к", " бутылке"]);
+});

@@ -39,16 +39,26 @@ class TitleRenderingTests(unittest.TestCase):
         self.assertLessEqual(bottom - top, 1920 * 0.42)
         self.assertGreaterEqual(left, 0)
 
-    def test_position_moves_the_block(self):
+    def test_a_title_sits_in_the_centre_and_moves_from_there(self):
+        """Одна точка привязки — центр кадра; дальше только сдвиг."""
         boxes = {}
-        for position in ("top", "center", "bottom"):
+        for name, shift in (("up", -500), ("centre", 0), ("down", 500)):
             image = renderer.render_title_image(
-                1080, 1920, "Заголовок", self.style(position=position, position_margin=150))
-            boxes[position] = self.ink_box(image)
+                1080, 1920, "Заголовок", self.style(offset_y=shift))
+            boxes[name] = self.ink_box(image)
 
-        self.assertLess(boxes["top"][1], boxes["center"][1])
-        self.assertLess(boxes["center"][1], boxes["bottom"][1])
-        self.assertGreaterEqual(boxes["top"][1], 100)
+        middle = (boxes["centre"][1] + boxes["centre"][3]) / 2
+        self.assertAlmostEqual(960, middle, delta=30)
+        self.assertAlmostEqual(500, boxes["centre"][1] - boxes["up"][1], delta=2)
+        self.assertAlmostEqual(500, boxes["down"][1] - boxes["centre"][1], delta=2)
+
+    def test_the_vertical_offset_stops_at_the_frame_edge(self):
+        for shift in (5000, -5000):
+            _left, top, _right, bottom = self.ink_box(renderer.render_title_image(
+                1080, 1920, "Заголовок", self.style(offset_y=shift)))
+
+            self.assertGreaterEqual(top, 0, shift)
+            self.assertLessEqual(bottom, 1920, shift)
 
     def test_horizontal_offset_moves_the_block_sideways(self):
         middle = self.ink_box(renderer.render_title_image(1080, 1920, "Заголовок", self.style()))
@@ -130,7 +140,8 @@ class TitleStorageTests(unittest.TestCase):
         def transcribe(path, **_p):
             return {"transcript": transcript_for("готово"), "cached": False}
 
-        def render(path, output, segments, style=None, progress_cb=None, overlays=None):
+        def render(path, output, segments, style=None, progress_cb=None, overlays=None,
+                   abort=None):
             self.rendered.append(overlays)
             return {"output": str(output)}
 
@@ -149,7 +160,8 @@ class TitleStorageTests(unittest.TestCase):
         self.service.run_transcription(self.job_id)
         self.service.run_render(self.job_id, {}, self.root / "out")
 
-        self.assertEqual([[{"text": "Заголовок", "start": 0.0, "end": 2.5}]], self.rendered)
+        self.assertEqual([[{"text": "Заголовок", "start": 0.0, "end": 2.5, "enabled": True}]],
+                         self.rendered)
         restarted = ManualJobService(self.root / "revisions",
                                      self.service.transcribe_fn, self.service.render_fn)
         self.assertEqual("Заголовок",
@@ -243,8 +255,8 @@ class TitleAnimationTests(unittest.TestCase):
 
     def test_two_titles_keep_their_own_style(self):
         style = {"title_styles": [
-            {"position": "top", "position_margin": 100, "anim_in_kind": "slide_left"},
-            {"position": "bottom", "position_margin": 100},
+            {"offset_y": -760, "anim_in_kind": "slide_left"},
+            {"offset_y": 760},
         ]}
         overlays = [{"text": "Сверху", "start": 0, "end": 2},
                     {"text": "Снизу", "start": 0, "end": 2}]
@@ -256,7 +268,7 @@ class TitleAnimationTests(unittest.TestCase):
         self.assertGreater(tops[1], 1400)
 
     def test_an_older_preset_with_one_shared_style_still_works(self):
-        style = {"title_style": {"position": "top", "font_size": 50}}
+        style = {"title_style": {"offset_y": -300, "font_size": 50}}
         for index in (0, 1):
-            self.assertEqual("top", renderer.title_style_for(style, index)["position"])
-        self.assertEqual("center", renderer.title_style_for({}, 0)["position"])
+            self.assertEqual(-300, renderer.title_style_for(style, index)["offset_y"])
+        self.assertEqual(0, renderer.title_style_for({}, 0)["offset_y"])

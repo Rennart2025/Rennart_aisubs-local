@@ -39,6 +39,35 @@ def split_sentences(segments):
     return segments
 
 
+def strip_end_dot(text):
+    """Drops the full stop that ends a word, keeping everything else.
+
+    "кухни." -> "кухни", but "3.5" and "т.е." keep the dots inside, and "?"
+    and "!" stay: a question is still a question without its period.
+    """
+    core = text.rstrip()
+    if not core.endswith((".", "…")):
+        return text
+    stripped = core.rstrip(".…")
+    if not stripped.strip():
+        return text          # a word that was nothing but dots stays as it was
+    return stripped + text[len(core):]
+
+
+def drop_end_dots(captions):
+    """Removes the trailing full stops from captions that are already grouped.
+
+    It runs after grouping on purpose: in phrase mode the period is what tells
+    the parser where one sentence ends, so removing it earlier would glue two
+    sentences into one caption.
+    """
+    for caption in captions:
+        for word in caption["words"]:
+            word["word"] = strip_end_dot(word["word"])
+        caption["text"] = "".join(w["word"] for w in caption["words"])
+    return captions
+
+
 def _is_punct(ch):
     return unicodedata.category(ch).startswith("P")
 
@@ -102,6 +131,7 @@ def parse(
     allow_partial_sentences: bool = False,
     sentence_breaks: bool = False,
     one_word: bool = False,
+    no_end_dots: bool = False,
 ):
     captions = []
     caption = {
@@ -111,16 +141,23 @@ def parse(
         "text": "",
     }
 
-    # Merge words that are not separated by spaces
-    for s, segment in enumerate(segments):
-        for w, word in enumerate(segment["words"]):
-            if w > 0 and word["word"][0] != " ":
-                segments[s]["words"][w-1]["word"] += word["word"]
-                segments[s]["words"][w-1]["end"] = word["end"]
-                del segments[s]["words"][w]
+    # A word that does not start with a space is the tail of the one before it:
+    # whisper splits "19-литровой" into "19" and "-литровой", and they have to
+    # be drawn as one word. Built into a new list rather than deleted in place -
+    # deleting while iterating skipped the word after every merge, so a word cut
+    # into three pieces came out half glued.
+    for segment in segments:
+        merged = []
+        for word in segment["words"]:
+            if merged and word["word"][:1] != " ":
+                merged[-1]["word"] += word["word"]
+                merged[-1]["end"] = word["end"]
+                continue
+            merged.append(word)
+        segment["words"] = merged
 
     if one_word:
-        return one_word_captions(segments)
+        return one_word_captions(segments)   # punctuation is gone there anyway
 
     if sentence_breaks:
         split_sentences(segments)
@@ -155,7 +192,7 @@ def parse(
     if caption["words"]:
         captions.append(caption)
 
-    return captions
+    return drop_end_dots(captions) if no_end_dots else captions
 
 def _only_hanging(caption):
     words = caption.get("words") or []

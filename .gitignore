@@ -34,3 +34,6 @@ desktop.ini
 
 # Interface preferences (language) — local, not part of the project
 settings.json
+
+# Saved projects — your work, not part of the program
+projects/

@@ -42,6 +42,8 @@
   function workspaceActions(snapshot, selectedId) {
     const items = (snapshot && snapshot.items) || [];
     const busy = items.some((item) => ACTIVE.has(item.state));
+    // A render already running does not block another one: it queues behind.
+    const rendering = items.some((item) => item.state === "rendering");
     const toTranscribe = items.filter((item) => NEEDS_TRANSCRIPTION.has(item.state));
     const ready = items.filter((item) => item.revision && RENDER_READY.has(item.state));
     const selected = items.find((item) => item.item_id === selectedId);
@@ -49,7 +51,8 @@
     let renderIds = ready.map((item) => item.item_id);
     let renderLabel = ready.length > 1 ? `Render (${ready.length})` : "Render";
     let renderAgain = false;
-    if (!ready.length && selected && selected.state === "completed" && selected.revision) {
+    if (!ready.length && selected && selected.revision
+        && (selected.state === "completed" || selected.state === "rendering")) {
       renderIds = [selected.item_id];
       renderLabel = "Render again";
       renderAgain = true;
@@ -63,13 +66,16 @@
 
     return {
       busy,
+      rendering,
       transcribe: {
         enabled: !busy && toTranscribe.length > 0,
         ids: toTranscribe.map((item) => item.item_id),
         label: toTranscribe.length > 1 ? `Transcribe (${toTranscribe.length})` : "Transcribe",
       },
       render: {
-        enabled: !busy && renderIds.length > 0,
+        // Queuing another pass while one runs is the point of the queue; only
+        // a transcription in progress holds Render back.
+        enabled: renderIds.length > 0 && (!busy || rendering),
         ids: renderIds,
         label: renderLabel,
         again: renderAgain,
@@ -195,6 +201,15 @@
     return displayWord(text, mode === "sentences");
   }
 
+  // segment_parser.strip_end_dot: the period that ends a word goes, "?" and
+  // "!" stay, and dots inside a word ("3.5") are left alone.
+  function stripEndDot(text) {
+    const word = String(text).trim();
+    if (!/[.…]$/.test(word)) return word;
+    const stripped = word.replace(/[.…]+$/, "");
+    return stripped || word;
+  }
+
   const HANGING_STRIP = /^[.,!?;:—\-–«»"'()]+|[.,!?;:—\-–«»"'()]+$/g;
   function makeIsHanging(hangingWords) {
     const set = new Set(hangingWords || []);
@@ -209,11 +224,39 @@
   //   fits(texts): true when these on-screen texts fit the caption box
   //   isHanging(text): prepositions that travel with the next word
   // Returns [{words: [{id, text, start, end}]}].
-  function buildCaptions(words, mode, fits, isHanging) {
+  // segment_parser.parse does this first of all: a word that does not start
+  // with a space is the tail of the previous one - whisper splits "19-литровой"
+  // into two tokens - and the renderer draws them as one word. The preview has
+  // to glue them the same way or it shows a space the video will not have.
+  function mergeContinuations(words) {
+    const merged = [];
+    words.forEach((word) => {
+      const raw = String(word.word);
+      const previous = merged[merged.length - 1];
+      if (previous && raw && raw[0] !== " ") {
+        previous.word += raw;
+        previous.end = Number(word.end);
+        previous.ids.push(word.id);
+        return;
+      }
+      merged.push({ id: word.id, ids: [word.id], word: raw,
+                    start: Number(word.start), end: Number(word.end) });
+    });
+    return merged;
+  }
+
+  function buildCaptions(words, mode, fits, isHanging, options) {
     const hanging = isHanging || (() => false);
-    const items = words
-      .map((word) => ({ id: word.id, raw: String(word.word), text: captionText(word.word, mode),
-                        start: Number(word.start), end: Number(word.end) }))
+    // `text` keeps the full stop so the words wrap exactly where the renderer
+    // wraps them; `display` is what the preview paints, without it.
+    const noEndDots = Boolean(options && options.noEndDots);
+    const items = mergeContinuations(words)
+      .map((word) => {
+        const text = captionText(word.word, mode);
+        return { id: word.id, ids: word.ids, raw: String(word.word), text,
+                 display: noEndDots ? stripEndDot(text) : text,
+                 start: Number(word.start), end: Number(word.end) };
+      })
       .filter((item) => item.text.trim());
 
     if (mode === "words") return items.map((item) => ({ words: [item] }));
@@ -270,6 +313,7 @@
 
   return {
     attentionReasons, buildCaptions, captionModeOf, captionText, capturePatchBatch, cleanWord,
+    mergeContinuations, stripEndDot,
     displayWord, makeIsHanging, pipelineProgress, previewWindow,
     renderGate, timingProblems, wordAt, workspaceActions, LOW_CONFIDENCE,
   };

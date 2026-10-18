@@ -41,6 +41,7 @@ def transcribe_phase(
     use_cached_transcript=True,
     progress_cb=None,
     cache_dir=CACHE_DIR,
+    abort=None,
 ):
     video_path = os.fspath(video_path)
     words_path = transcript_cache_path(video_path, model_size, language, cache_dir)
@@ -57,6 +58,7 @@ def transcribe_phase(
             device=device,
             language=language,
             progress_cb=progress_cb,
+            abort=abort,
         )
         temp_path = words_path + ".tmp"
         with open(temp_path, "w", encoding="utf-8") as handle:
@@ -72,14 +74,15 @@ def transcribe_phase(
     }
 
 
-def render_phase(video_path, output_path, segments, style=None, progress_cb=None, overlays=None):
+def render_phase(video_path, output_path, segments, style=None, progress_cb=None,
+                 overlays=None, abort=None):
     video_path = os.fspath(video_path)
     output_path = os.fspath(output_path)
     if not segments or not any(segment.get("words") for segment in segments):
         raise ValueError("no speech was detected; video was not rendered")
     renderer_mod.render_captions(
         video_path, segments, output_path, style=style, progress_cb=progress_cb,
-        overlays=overlays,
+        overlays=overlays, abort=abort,
     )
     return {"output": output_path}
 

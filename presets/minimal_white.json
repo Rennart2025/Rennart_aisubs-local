@@ -3,17 +3,17 @@
   "font": "fonts/FiraSans-Medium.ttf",
   "font_size": 60,
   "text_case": "none",
-
   "text_color": "#FFFFFF",
   "stroke_color": "#000000",
   "stroke_width": 2,
-
   "shadow_enabled": true,
   "shadow_color": "#000000",
   "shadow_opacity": 0.35,
   "shadow_blur": 4,
-  "shadow_offset": [0, 2],
-
+  "shadow_offset": [
+    0,
+    2
+  ],
   "highlight_style": "color",
   "word_highlight_color": "#9FD8FF",
   "active_text_color": "#FFFFFF",
@@ -22,11 +22,40 @@
   "box_radius": 10,
   "box_padding_x": 12,
   "box_padding_y": 6,
-
   "line_count": 2,
   "max_width_ratio": 0.8,
   "line_spacing": 1.25,
-
   "position": "bottom",
-  "position_margin": 120
+  "position_margin": 120,
+  "title_styles": [
+    {
+      "font": "fonts/Rubik-var.ttf#ExtraBold",
+      "font_size": 88,
+      "text_color": "#FFFFFF",
+      "highlight_style": "none",
+      "stroke_width": 0,
+      "shadow_enabled": true,
+      "shadow_blur": 14,
+      "shadow_opacity": 0.5,
+      "shadow_offset": [
+        0,
+        4
+      ],
+      "offset_y": -670
+    },
+    {
+      "font": "fonts/FiraSans-Medium.ttf",
+      "font_size": 64,
+      "text_color": "#D8D8D8",
+      "highlight_style": "none",
+      "offset_y": -560
+    },
+    {
+      "font": "fonts/FiraSans-Medium.ttf",
+      "font_size": 60,
+      "text_color": "#FFFFFF",
+      "highlight_style": "none",
+      "offset_y": 600
+    }
+  ]
 }

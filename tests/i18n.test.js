@@ -85,8 +85,8 @@ test("the dictionary has no entries nobody asks for", () => {
   // quietly stay Russian there.
   // Python sends some of these straight to a toast, so its sources count too.
   const haystack = [read(GUI, "index.html"), ...SCRIPTS.map((n) => read(GUI, n)),
-    read(ROOT, "app.py"), read(ROOT, "lib", "updates.py"),
-    read(ROOT, "lib", "manual_jobs.py")].join("\n");
+    read(ROOT, "app.py"), ...["updates", "manual_jobs", "project_file", "plain_text",
+      "transcript_revisions"].map((name) => read(ROOT, "lib", name + ".py"))].join("\n");
   const unused = Object.keys(DICT).filter((key) => !haystack.includes(key));
   assert.deepEqual(unused, [], "в словаре есть строки, которых нет в интерфейсе");
 });

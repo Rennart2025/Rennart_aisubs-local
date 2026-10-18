@@ -10,6 +10,7 @@ rendering are decoupled - you can re-render with a new style without re-transcri
 
 import os
 import sys
+import glob
 import json
 import copy
 import math
@@ -20,6 +21,7 @@ import proglog
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "lib"))
 import segment_parser
+from cancellation import Cancelled, check as _check_abort
 from typography import is_hanging as _is_hanging
 
 DEFAULT_STYLE = {
@@ -66,6 +68,12 @@ DEFAULT_STYLE = {
     "position": "bottom",           # "bottom" | "center" | "top"
     "position_margin": 190,
 
+    # Drops the full stop that ends a sentence, in every grouping mode.
+    "no_end_dots": False,
+
+    # 1.0 renders the real thing; 0.5 a draft at half the frame size.
+    "preview_scale": 1.0,
+
     # How a caption arrives on screen: "none" | "fade" | "pop" | "rise".
     "word_animation": "none",
     "word_animation_ms": 220,
@@ -107,11 +115,11 @@ TITLE_STYLE = {
     "max_width_ratio": 0.86,
     "line_spacing": 1.18,
 
-    "position": "center",
-    "position_margin": 190,
-    # Horizontal shift from the centre, in source pixels: minus left, plus
-    # right. Clamped at render time so a title never leaves the frame.
+    # A title has one anchor, the centre of the frame, and is moved from
+    # there: offset_x minus left / plus right, offset_y minus up / plus down,
+    # in source pixels. Clamped at render time so it never leaves the frame.
     "offset_x": 0,
+    "offset_y": 0,
 
     # Arrival and departure, set apart: each has a switch, a kind and a length.
     "anim_in_enabled": True,
@@ -175,7 +183,7 @@ BUNDLED_FONT_LABELS = {
     "fonts/Oswald-var.ttf#Bold": {"label": "Oswald Bold", "css_family": "Oswald", "css_weight": 700, "cyrillic": True},
     "fonts/Rubik-var.ttf#ExtraBold": {"label": "Rubik ExtraBold", "css_family": "Rubik", "css_weight": 800, "cyrillic": True},
     "fonts/PTSans-Bold.ttf": {"label": "PT Sans Bold", "css_family": "PT Sans Bold", "css_weight": 400, "cyrillic": True},
-    "fonts/BebasNeue-Regular.ttf": {"label": "Bebas Neue", "css_family": "Bebas Neue", "css_weight": 400, "cyrillic": True},
+    "fonts/BebasNeue-Regular.ttf": {"label": "Bebas Neue", "css_family": "Bebas Neue", "css_weight": 400, "cyrillic": False},
     "fonts/Poppins-ExtraBold.ttf": {"label": "Poppins ExtraBold", "css_family": "Poppins ExtraBold", "css_weight": 400, "cyrillic": False},
     "fonts/Poppins-Black.ttf": {"label": "Poppins Black", "css_family": "Poppins Black", "css_weight": 400, "cyrillic": False},
     "fonts/Anton-Regular.ttf": {"label": "Anton", "css_family": "Anton", "css_weight": 400, "cyrillic": False},
@@ -199,7 +207,14 @@ def _get_font(path, size):
         file_path, _, variation = path.partition("#")
         font = ImageFont.truetype(file_path, size)
         if variation:
-            font.set_variation_by_name(variation)
+            # An instance the font does not have (a typo in a preset, a
+            # different build of the font) falls back to its default face
+            # instead of failing the whole render.
+            try:
+                font.set_variation_by_name(variation)
+            except (ValueError, OSError):
+                print(f"[renderer] {os.path.basename(file_path)}: no instance "
+                      f"'{variation}', using the default face")
         _font_cache[key] = font
     return _font_cache[key]
 
@@ -207,9 +222,18 @@ def _glyph_raster(font, ch):
     mask = font.getmask(ch)
     return bytes(mask) if mask.size != (0, 0) else b""
 
+# A code point no font maps to a real glyph (a Unicode noncharacter), so what
+# a font draws for it is its .notdef - an empty space in some fonts, a crossed
+# box in others. Written as an escape on purpose: the previous reference was a
+# literal U+F8FF, a private-use slot some fonts fill with a drawing, which made
+# every missing letter look "different from .notdef" - so a Latin-only face
+# chosen for Russian text came out as a row of boxes instead of falling back.
+_MISSING = "\uffff"
+
+
 def _font_covers(font, text):
     """True if every visible character renders as something other than .notdef."""
-    notdef = _glyph_raster(font, "")
+    notdef = _glyph_raster(font, _MISSING)
     return all(_glyph_raster(font, ch) != notdef for ch in set(text) if ch.strip())
 
 def _fit_font_for_lines(lines, font_path, base_font, base_size, stroke_width, max_width, draw, extra_gap=0, min_scale=0.4):
@@ -616,17 +640,9 @@ def render_title_image(video_w, video_h, text, style):
     if style["highlight_style"] == "box":
         max_width = min(max_width, video_w - 2 * (style["box_padding_x"] + 4))
     max_width = max(64, max_width)
-    # Height budget: the text keeps its distance from the edge it is anchored
-    # to, and must not run past the opposite one. A title that would need more
-    # room is shrunk, never cropped.
-    margin = _effective_position_margin(style, video_h)
-    if style["position"] == "center":
-        room = video_h - 2 * margin
-    else:
-        room = video_h - margin - int(video_h * 0.08)
-    # A title stays a title: never past the free space, and never more than
-    # about a third of the frame. Longer text is shrunk, never cropped.
-    max_height = max(int(video_h * 0.22), min(room, int(video_h * 0.38)))
+    # A title stays a title: never more than about a third of the frame.
+    # Longer text is shrunk, never cropped.
+    max_height = int(video_h * 0.38)
 
     words = text.split()
     size = max(10, int(style["font_size"]))
@@ -645,13 +661,11 @@ def render_title_image(video_w, video_h, text, style):
     pad_y = style["box_padding_y"] * scale
     radius = style["box_radius"] * scale
 
+    # Centred, then moved by offset_y; the block stops at the frame edge
+    # rather than being cut by it.
     block_height = line_height * len(lines)
-    if style["position"] == "top":
-        block_top = margin
-    elif style["position"] == "bottom":
-        block_top = video_h - margin - block_height
-    else:
-        block_top = video_h // 2 - block_height // 2
+    shift_y = int(style.get("offset_y") or 0)
+    block_top = video_h // 2 - block_height // 2 + shift_y
     block_top = max(0, min(block_top, video_h - block_height))
 
     canvas = Image.new("RGBA", (video_w, video_h), (0, 0, 0, 0))
@@ -868,6 +882,12 @@ def title_style_for(style, index):
     merged = copy.deepcopy(TITLE_STYLE)
     if chosen:
         merged.update({k: v for k, v in chosen.items() if v is not None})
+    # A draft renders on a smaller frame, so the title shrinks with it. Done
+    # here rather than in scale_style so that a title left at its defaults is
+    # scaled as well.
+    draft = float((style or {}).get("preview_scale") or 1.0)
+    if 0.1 <= draft < 1.0:
+        merged = scale_style(merged, draft)
     return merged
 
 
@@ -876,6 +896,9 @@ def title_clips(video_w, video_h, video_duration, overlays, style):
     of them can sit on screen at once, in different places and colours."""
     clips = []
     for index, overlay in enumerate(overlays or []):
+        # A title switched off in the interface keeps its text but is not drawn.
+        if (overlay or {}).get("enabled") is False:
+            continue
         text = str((overlay or {}).get("text") or "").strip()
         if not text:
             continue
@@ -900,22 +923,85 @@ def title_clips(video_w, video_h, video_duration, overlays, style):
 
 
 class _ProgressLogger(proglog.ProgressBarLogger):
-    def __init__(self, cb):
+    """Progress out, Stop in.
+
+    moviepy drives the write from Python and reports every frame through this
+    logger, so this callback is also the one place where an interrupted render
+    can be noticed while ffmpeg is already running. Raising here unwinds out
+    of the frame loop, and the writer's context manager closes ffmpeg on the
+    way out.
+    """
+
+    def __init__(self, cb, abort=None):
         super().__init__()
         self._cb = cb
+        self._abort = abort
 
     def bars_callback(self, bar, attr, value, old_value=None):
+        _check_abort(self._abort)
         if self._cb is None or attr != "index":
             return
         total = self.bars[bar].get("total")
         if total:
             self._cb("rendering", int(100 * value / max(total, 1)))
 
-def render_captions(video_path, segments, output_path, style=None, progress_cb=None, overlays=None):
+# Everything in the style that is measured in pixels of the source frame. The
+# rest - ratios, opacities, durations, line counts - means the same thing at
+# any size.
+_PIXEL_KEYS = ("font_size", "stroke_width", "shadow_blur", "shadow2_blur",
+               "box_radius", "box_padding_x", "box_padding_y",
+               "position_margin", "offset_x", "offset_y")
+_PIXEL_PAIRS = ("shadow_offset", "shadow2_offset")
+
+
+def scale_style(style, factor):
+    """The same look at another frame size.
+
+    A draft render at half resolution has to shrink the text with the frame,
+    or a 90 px caption on a 540 px frame comes out twice as large as it will
+    be in the real render.
+    """
+    scaled = copy.deepcopy(style)
+    for key in _PIXEL_KEYS:
+        value = scaled.get(key)
+        if isinstance(value, (int, float)):
+            scaled[key] = max(1, int(round(value * factor))) if key == "font_size" \
+                else int(round(value * factor))
+    for key in _PIXEL_PAIRS:
+        pair = scaled.get(key)
+        if isinstance(pair, (list, tuple)) and len(pair) >= 2:
+            scaled[key] = [int(round(pair[0] * factor)), int(round(pair[1] * factor))]
+    # Title styles are deliberately left alone here: they are merged with the
+    # defaults in title_style_for, and that is where they get scaled - once,
+    # and including the defaults of a title the user never touched.
+    return scaled
+
+
+def _remove_partial(output_path):
+    """Deletes an interrupted render and the temp files moviepy leaves behind."""
+    stem, _ext = os.path.splitext(output_path)
+    for path in [output_path] + glob.glob(stem + "TEMP_MPY*"):
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+        except OSError:
+            pass
+
+
+def render_captions(video_path, segments, output_path, style=None, progress_cb=None,
+                    overlays=None, abort=None):
     merged_style = copy.deepcopy(DEFAULT_STYLE)
     if style:
         merged_style.update(style)
     style = merged_style
+
+    # A draft: half the frame in each direction is a quarter of the pixels to
+    # draw and to encode, and the text shrinks with it so the result looks
+    # like the real render, only smaller.
+    draft = float(style.get("preview_scale") or 1.0)
+    draft = 1.0 if not 0.1 <= draft < 1.0 else draft
+    if draft != 1.0:
+        style = scale_style(style, draft)
 
     if progress_cb:
         progress_cb("preparing", 0)
@@ -937,6 +1023,10 @@ def render_captions(video_path, segments, output_path, style=None, progress_cb=N
                 break
 
     video = VideoFileClip(video_path)
+    if draft != 1.0:
+        # Even sizes only: h.264 refuses odd dimensions.
+        video = video.resized((max(2, int(video.w * draft) // 2 * 2),
+                               max(2, int(video.h * draft) // 2 * 2)))
     max_width = int(video.w * style["max_width_ratio"])
     if style["highlight_style"] == "box":
         # leave room so the pill's padding can never touch the frame edge
@@ -959,6 +1049,7 @@ def render_captions(video_path, segments, output_path, style=None, progress_cb=N
     captions = segment_parser.parse(
         segments=segments_copy, fit_function=fit_fn,
         sentence_breaks=mode == "sentences", one_word=mode == "words",
+        no_end_dots=bool(style.get("no_end_dots")),
     )
 
     animation = _animation_for(style)
@@ -1016,6 +1107,7 @@ def render_captions(video_path, segments, output_path, style=None, progress_cb=N
                 clips.append(img_clip)
 
             done_words += 1
+            _check_abort(abort)
             if progress_cb and total_words:
                 progress_cb("building", int(100 * done_words / total_words))
 
@@ -1024,15 +1116,26 @@ def render_captions(video_path, segments, output_path, style=None, progress_cb=N
 
     final = CompositeVideoClip(clips, size=(video.w, video.h))
 
-    logger = _ProgressLogger(progress_cb) if progress_cb else None
-    final.write_videofile(
-        output_path,
-        codec="libx264",
-        audio_codec="aac",
-        fps=video.fps,
-        logger=logger,
-        threads=os.cpu_count(),
-    )
+    logger = _ProgressLogger(progress_cb, abort)
+    try:
+        final.write_videofile(
+            output_path,
+            codec="libx264",
+            audio_codec="aac",
+            # A draft is always 25 fps: a 50 or 60 fps source would otherwise
+            # cost twice the frames for a file that is only looked at.
+            fps=25 if draft != 1.0 else video.fps,
+            logger=logger,
+            threads=os.cpu_count(),
+            # A draft is for looking at, not for keeping: the fast preset
+            # roughly halves the encoding time again.
+            preset="veryfast" if draft != 1.0 else "medium",
+        )
+    except Cancelled:
+        # A half-written mp4 is not a result: it would sit in the output folder
+        # looking like one. The temporary audio moviepy writes first goes too.
+        _remove_partial(output_path)
+        raise
 
     if progress_cb:
         progress_cb("done", 100)

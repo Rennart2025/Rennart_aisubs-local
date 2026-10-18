@@ -23,6 +23,14 @@ class ValidationError(TranscriptError):
         super().__init__("; ".join(self.errors))
 
 
+def _leading_space(text):
+    """The whitespace a word starts with, which is what separates it from the
+    previous one. Whisper writes every word as " слово"; a word without that
+    space is a continuation of the one before it, and the renderer glues the
+    two together."""
+    return text[: len(text) - len(text.lstrip())]
+
+
 class TranscriptStore:
     def __init__(self, root):
         self.root = Path(root)
@@ -48,7 +56,11 @@ class TranscriptStore:
             json.dump(document, handle, ensure_ascii=False, indent=2)
         os.replace(temp, path)
 
-    def create(self, item_id, source_path, transcription, params):
+    # A caption that is already on screen when the video starts reads as a
+    # glitch, and the first word is where the recogniser is least sure anyway.
+    FIRST_WORD_START = 0.1
+
+    def create(self, item_id, source_path, transcription, params, lead_in=True):
         words = []
         for segment_index, segment in enumerate(transcription.get("segments") or []):
             for word_index, word in enumerate(segment.get("words") or []):
@@ -62,6 +74,12 @@ class TranscriptStore:
                     "edited": False,
                     "deleted": False,
                 })
+        # Only on a fresh transcription: text restored from a project comes
+        # back exactly as it was saved.
+        if lead_in and words and words[0]["start"] < self.FIRST_WORD_START:
+            first = words[0]
+            first["start"] = min(self.FIRST_WORD_START, max(0.0, first["end"] - 0.05))
+
         path = self._path(item_id)
         document = self._load(item_id) if path.exists() else {"item_id": item_id, "revisions": []}
         revision = {
@@ -114,7 +132,11 @@ class TranscriptStore:
                 text = str(operation.get("text", ""))
                 if not text.strip():
                     raise TranscriptError("word text cannot be empty")
-                word["word"] = text
+                # The editor shows a word without its leading space, so the
+                # text that comes back has none either. Keeping the original
+                # separator is what stops an edited word from sticking to the
+                # word before it ("к19-литровой").
+                word["word"] = _leading_space(word["word"]) + text.strip()
                 word["edited"] = True
             elif kind == "delete":
                 word["deleted"] = True
@@ -127,9 +149,11 @@ class TranscriptStore:
                 word["end"] = float(operation["end"])
                 word["edited"] = True
             elif kind == "insert_after":
+                # A word typed by hand is always a word of its own, never a
+                # continuation of the previous one.
                 inserted = {
                     "id": f"inserted-{uuid.uuid4().hex[:12]}",
-                    "word": str(operation.get("text", "")),
+                    "word": " " + str(operation.get("text", "")).strip(),
                     "start": float(operation["start"]),
                     "end": float(operation["end"]),
                     "probability": None,
@@ -168,6 +192,22 @@ class TranscriptStore:
             errors.append("в тексте не осталось ни одного слова")
         return errors
 
+    def retarget(self, item_id, source_path, duration=None):
+        """Points the stored text at another video file.
+
+        The same recording re-exported at another quality keeps its audio, so
+        the words and their timings are still right - only the file under them
+        changed. The duration comes along because it is what the validator
+        checks the last word against.
+        """
+        document = self._load(item_id)
+        for revision in document["revisions"]:
+            revision["source_path"] = os.path.abspath(source_path)
+            if duration:
+                revision["duration"] = float(duration)
+        self._save(item_id, document)
+        return copy.deepcopy(document["revisions"][-1])
+
     def approve(self, item_id, revision):
         document = self._load(item_id)
         if document["revisions"][-1]["revision"] != int(revision):
@@ -186,11 +226,20 @@ class TranscriptStore:
         if errors:
             raise ValidationError(errors)
         grouped = {}
+        previous_deleted = False
         for word in data["words"]:
             if word.get("deleted"):
+                previous_deleted = True
                 continue
+            text = word["word"]
+            # A word that follows a deleted one cannot be a continuation of it
+            # any more, so it gets the separator back instead of sticking to
+            # whatever word is now in front of it.
+            if previous_deleted and text[:1] not in (" ", ""):
+                text = " " + text
+            previous_deleted = False
             grouped.setdefault(word["segment_index"], []).append({
-                "word": word["word"],
+                "word": text,
                 "start": word["start"],
                 "end": word["end"],
                 "probability": word.get("probability"),

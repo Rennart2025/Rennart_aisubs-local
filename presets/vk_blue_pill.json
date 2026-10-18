@@ -3,17 +3,17 @@
   "font": "fonts/Montserrat-var.ttf#ExtraBold",
   "font_size": 84,
   "text_case": "upper",
-
   "text_color": "#FFFFFF",
   "stroke_color": "#000000",
   "stroke_width": 0,
-
   "shadow_enabled": true,
   "shadow_color": "#000000",
   "shadow_opacity": 0.45,
   "shadow_blur": 6,
-  "shadow_offset": [0, 3],
-
+  "shadow_offset": [
+    0,
+    3
+  ],
   "highlight_style": "box",
   "word_highlight_color": "#3FA9E8",
   "active_text_color": "#FFFFFF",
@@ -22,11 +22,44 @@
   "box_radius": 16,
   "box_padding_x": 20,
   "box_padding_y": 10,
-
   "line_count": 1,
   "max_width_ratio": 0.86,
   "line_spacing": 1.18,
-
   "position": "bottom",
-  "position_margin": 190
+  "position_margin": 190,
+  "title_styles": [
+    {
+      "font": "fonts/Montserrat-var.ttf#ExtraBold",
+      "font_size": 96,
+      "text_color": "#70CBFF",
+      "highlight_style": "none",
+      "shadow_enabled": true,
+      "shadow_blur": 8,
+      "shadow_opacity": 0.55,
+      "shadow_offset": [
+        0,
+        4
+      ],
+      "offset_y": -680
+    },
+    {
+      "font": "fonts/Montserrat-var.ttf#ExtraBold",
+      "font_size": 72,
+      "text_color": "#FFFFFF",
+      "highlight_style": "box",
+      "box_color": "#3FA9E8",
+      "active_text_color": "#FFFFFF",
+      "box_radius": 14,
+      "box_padding_x": 22,
+      "box_padding_y": 10,
+      "offset_y": -560
+    },
+    {
+      "font": "fonts/Montserrat-var.ttf#Bold",
+      "font_size": 64,
+      "text_color": "#FFFFFF",
+      "highlight_style": "none",
+      "offset_y": 600
+    }
+  ]
 }

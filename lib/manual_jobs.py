@@ -15,6 +15,8 @@ import threading
 import uuid
 from pathlib import Path
 
+from lib import project_file
+from lib.cancellation import Cancelled
 from lib.transcript_revisions import TranscriptStore
 
 
@@ -164,6 +166,90 @@ class ManualJobService:
             self._persist_jobs()
             return self._snapshot_unlocked(job)
 
+    def replace_source(self, item_id, new_path, duration=None):
+        """Swaps the video under a file, keeping its text and titles.
+
+        For the same clip re-exported at another quality: the audio is
+        untouched, so every word still lands where it did. Only the path
+        changes - the transcript, the manual edits and the titles stay.
+        """
+        job, item = self._item(item_id)
+        if item["state"] in ACTIVE:
+            raise ManualJobError("файл сейчас обрабатывается")
+        full = os.path.abspath(os.fspath(new_path))
+        if not os.path.exists(full):
+            raise ManualJobError("файл не найден: " + full)
+        clash = os.path.normcase(full)
+        for other in job["items"]:
+            if other is not item and os.path.normcase(other["path"]) == clash:
+                raise ManualJobError("это видео уже есть в списке")
+
+        item["path"] = full
+        item["name"] = os.path.basename(full)
+        item["output"] = None
+        if item.get("revision"):
+            self.store.retarget(item_id, full, duration)
+            # The text is untouched, but it has never been rendered onto this
+            # file, so the list says so.
+            item.update(state="needs_review", stage="needs_review", error=None)
+        self._emit(job, item)
+        return self.snapshot(job["job_id"])
+
+    # ---------- the work as a file ----------
+
+    def export_project(self, style, app_version=""):
+        """Everything the current list holds, ready to be written to disk."""
+        with self.lock:
+            job = list(self.jobs.values())[-1] if self.jobs else None
+            items = copy.deepcopy(job["items"]) if job else []
+            params = copy.deepcopy(job["params"]) if job else {}
+        entries = []
+        for item in items:
+            transcript = None
+            if item.get("revision"):
+                try:
+                    transcript = self.store.latest(item["item_id"])
+                except Exception:
+                    transcript = None
+            entries.append(project_file.item_entry(item, transcript))
+        return project_file.build(entries, style, params, app_version)
+
+    def import_project(self, data, project_dir=""):
+        """Replaces the list with the one saved in the project.
+
+        The text comes back as revision 1 of each file: the edits are in it,
+        the history behind them stays where it was made.
+        """
+        project_file.validate(data)
+        entries = data.get("items") or []
+        paths = [project_file.resolve_path(entry, project_dir) for entry in entries]
+
+        with self.lock:
+            for job in list(self.jobs.values()):
+                for item in job["items"]:
+                    self.item_to_job.pop(item["item_id"], None)
+            self.jobs = {}
+
+        snapshot = self.create_job(paths, data.get("params") or {}, initial_state="pending")
+        job = self._job(snapshot["job_id"])
+        missing = []
+        for item, entry in zip(job["items"], entries):
+            item["overlays"] = [dict(overlay) for overlay in entry.get("overlays") or []]
+            if not os.path.exists(item["path"]):
+                missing.append(item["name"])
+            if not entry.get("words"):
+                continue
+            revision = self.store.create(
+                item["item_id"], item["path"],
+                project_file.transcription_of(entry), data.get("params") or {},
+                lead_in=False,
+            )
+            item.update(state="needs_review", stage="needs_review",
+                        revision=revision["revision"], progress=0, error=None)
+        self._persist_jobs()
+        return {"job": self.snapshot(job["job_id"]), "missing": missing,
+                "style": data.get("style") or {}}
+
     # ---------- lookups ----------
 
     def _job(self, job_id):
@@ -206,7 +292,8 @@ class ManualJobService:
 
     # ---------- transcription ----------
 
-    def run_transcription(self, job_id, cancelled=None, selected_ids=None, params=None):
+    def run_transcription(self, job_id, cancelled=None, selected_ids=None, params=None,
+                          abort=None):
         job = self._job(job_id)
         if params:
             with self.lock:
@@ -245,7 +332,7 @@ class ManualJobService:
                 if not os.path.exists(item["path"]):
                     raise FileNotFoundError("исходный файл не найден: " + item["path"])
                 artifact = self.transcribe_fn(
-                    item["path"], progress_cb=progress, **effective_params
+                    item["path"], progress_cb=progress, abort=abort, **effective_params
                 )
                 transcript = artifact["transcript"]
                 revision = self.store.create(
@@ -256,12 +343,18 @@ class ManualJobService:
                     state=state, stage=state, progress=100,
                     revision=revision["revision"], error=None,
                 )
+            except Cancelled:
+                # Stopped by hand: not a failure, and the file is ready to be
+                # picked up again by the next Transcribe.
+                item.update(state="cancelled", stage="cancelled", error=None)
+                self._emit(job, item)
+                break
             except Exception as exc:
                 item.update(state="failed", stage="failed", error=str(exc))
             self._emit(job, item)
         return self.snapshot(job_id)
 
-    def retranscribe(self, item_id, params=None, cancelled=None):
+    def retranscribe(self, item_id, params=None, cancelled=None, abort=None):
         job, item = self._item(item_id)
         if item["state"] in ACTIVE:
             raise ManualJobError("файл сейчас обрабатывается")
@@ -270,7 +363,7 @@ class ManualJobService:
             item["params_override"] = copy.deepcopy(params)
         self._emit(job, item)
         return self.run_transcription(
-            job["job_id"], selected_ids=[item_id], cancelled=cancelled
+            job["job_id"], selected_ids=[item_id], cancelled=cancelled, abort=abort
         )
 
     # ---------- editing ----------
@@ -280,10 +373,12 @@ class ManualJobService:
         return self.store.latest(item_id)
 
     def set_overlays(self, item_id, overlays):
-        """Manual titles for one file: [{text, start, end}, ...]."""
+        """Manual titles for one file: [{text, start, end, enabled}, ...].
+
+        A title switched off keeps its text and timings - it is simply not
+        drawn, so it can be brought back without retyping it.
+        """
         job, item = self._item(item_id)
-        if item["state"] in ACTIVE:
-            raise ManualJobError("файл сейчас обрабатывается")
         cleaned = []
         for overlay in overlays or []:
             try:
@@ -291,10 +386,15 @@ class ManualJobService:
                 end = max(0.0, float((overlay or {}).get("end") or 0))
             except (TypeError, ValueError):
                 start = end = 0.0
+            enabled = (overlay or {}).get("enabled")
             cleaned.append({"text": str((overlay or {}).get("text") or ""),
-                            "start": start, "end": end})
+                            "start": start, "end": end,
+                            "enabled": True if enabled is None else bool(enabled)})
         item["overlays"] = cleaned
-        # A title change is a change to the output, like editing the text.
+        # A title change is a change to the output, like editing the text. A
+        # file being rendered right now keeps its state: that pass carries its
+        # own copy of the titles, and run_render settles the state when it is
+        # done.
         if item["state"] == "completed" and item.get("revision"):
             item.update(state="needs_review", stage="needs_review")
         self._emit(job, item)
@@ -319,7 +419,8 @@ class ManualJobService:
 
     # ---------- rendering ----------
 
-    def run_render(self, job_id, style, output_dir, selected_ids=None, cancelled=None):
+    def run_render(self, job_id, style, output_dir, selected_ids=None, cancelled=None,
+                   abort=None, overlays_by_item=None):
         job = self._job(job_id)
         if not self._snapshot_unlocked(job)["transcription_settled"]:
             raise ManualJobError("transcription is still running")
@@ -340,7 +441,9 @@ class ManualJobService:
                 # Leave the file as it was: its transcript is still good.
                 skipped += 1
                 continue
-            stem = Path(item["path"]).stem + "_captioned"
+            # A draft render says so in its name, so the two never get mixed up.
+            draft = 0.1 <= float((style or {}).get("preview_scale") or 1.0) < 1.0
+            stem = Path(item["path"]).stem + "_captioned" + ("_preview" if draft else "")
             candidate = stem
             suffix = 2
             while candidate.lower() in used_names or (output_dir / f"{candidate}.mp4").exists():
@@ -348,6 +451,7 @@ class ManualJobService:
                 suffix += 1
             used_names.add(candidate.lower())
             output = output_dir / f"{candidate}.mp4"
+            previous_state = item["state"]
             item.update(state="rendering", stage="preparing", progress=0, error=None)
             self._emit(job, item)
 
@@ -359,15 +463,33 @@ class ManualJobService:
                 if not os.path.exists(item["path"]):
                     raise FileNotFoundError("исходный файл не найден: " + item["path"])
                 segments = self.store.render_segments(item["item_id"], item["revision"])
+                # Titles as they were when this pass was queued: a second
+                # render lined up behind it carries its own set, which is how
+                # one clip can be made with a title and without one.
+                used_overlays = (overlays_by_item or {}).get(item["item_id"])
+                if used_overlays is None:
+                    used_overlays = item.get("overlays") or []
                 result = self.render_fn(
                     item["path"], output, segments, style=copy.deepcopy(style),
-                    progress_cb=progress, overlays=copy.deepcopy(item.get("overlays") or []),
+                    progress_cb=progress, overlays=copy.deepcopy(used_overlays),
+                    abort=abort,
                 )
+                # If the titles moved on while this was rendering, the file on
+                # disk is already one version behind - the list should say so.
+                current = item.get("overlays") or []
+                settled = "completed" if current == used_overlays else "needs_review"
                 item.update(
-                    state="completed", stage="completed", progress=100,
+                    state=settled, stage=settled, progress=100,
                     output=result["output"], error=None,
                 )
                 completed += 1
+            except Cancelled:
+                # The half-written file is already gone; the item goes back to
+                # what it was, so Render can simply be pressed again.
+                item.update(state=previous_state, stage="cancelled", progress=0, error=None)
+                self._emit(job, item)
+                skipped += 1
+                break
             except Exception as exc:
                 item.update(state="render_failed", stage="render_failed", error=str(exc))
                 failed += 1

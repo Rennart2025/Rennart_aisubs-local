@@ -5,6 +5,7 @@ js_api bridge that drives transcribe.py + renderer.py (pipeline.py).
 
 import os
 import sys
+import copy
 import json
 import glob
 import queue
@@ -23,14 +24,14 @@ import pipeline as pipeline_mod
 import transcribe as transcribe_mod
 import mediaserver
 import fontlist
-from lib import updates
+from lib import plain_text, project_file, updates
 from lib.manual_jobs import ManualJobService
 from lib.transcript_revisions import RevisionConflict, TranscriptError
 
 PRESETS_DIR = os.path.join(BASE_DIR, "presets")
 OUTPUT_DIR = os.path.join(BASE_DIR, "output")
 REVISIONS_DIR = os.path.join(BASE_DIR, "cache", "revisions")
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.7.1"
 CREATOR_CHANNEL_URL = "https://t.me/daipotestit"
 CACHE_DIR = os.path.join(BASE_DIR, "cache")
 
@@ -41,11 +42,12 @@ LINKS = {
     "repo": "https://github.com/Rennart2025/Rennart_aisubs-local",
     "page": "https://rennart2025.github.io/Rennart_aisubs-local/",
 }
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-# Window preferences, kept next to the program and out of the repository, so
-# unpacking an update over the folder never resets them.
+# Saved projects and window preferences live next to the program and outside
+# the repository, so unpacking an update over the folder never touches them.
+PROJECTS_DIR = os.path.join(BASE_DIR, "projects")
 SETTINGS_PATH = os.path.join(BASE_DIR, "settings.json")
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs(PROJECTS_DIR, exist_ok=True)
 ALLOWED_SETTINGS = {"lang"}
 
 
@@ -81,11 +83,14 @@ class Api:
 
     def __init__(self):
         self._window = None
-        self._cancelled = False
+        self._cancelled = False      # finish this file, drop the rest
+        self._aborted = False        # stop this file right now
         self._js_queue = queue.Queue()
         self._js_thread = threading.Thread(target=self._js_pump, daemon=True)
         self._js_thread.start()
         self._worker_lock = threading.Lock()
+        self._queue_lock = threading.Lock()
+        self._render_queue = []
         self._manual = ManualJobService(
             REVISIONS_DIR,
             pipeline_mod.transcribe_phase,
@@ -147,6 +152,110 @@ class Api:
             from System import Action
             form.BeginInvoke(Action(show))
         return True
+
+    # ---------- the work as a file ----------
+
+    def _on_ui_thread(self, show):
+        """Runs a file dialog on the thread that owns the window.
+
+        Same reason as pick_videos: ShowDialog called from the js_api thread
+        deadlocks the window.
+        """
+        form = getattr(self._window, "native", None)
+        if form is None:
+            show()
+        else:
+            from System import Action
+            form.BeginInvoke(Action(show))
+        return True
+
+    def replace_source(self, item_id):
+        """Picks another video for a file that already has text."""
+        def show():
+            try:
+                result = self._window.create_file_dialog(
+                    FileDialog.OPEN,
+                    allow_multiple=False,
+                    file_types=("Видео (*.mp4;*.mov;*.mkv;*.avi;*.webm)", "Все файлы (*.*)"),
+                )
+                path = result[0] if isinstance(result, (list, tuple)) else result
+                if not path:
+                    return self._js("onSourceReplaced", {"ok": False, "cancelled": True})
+                info = {}
+                try:
+                    info = mediaserver.probe(path) or {}
+                except Exception:
+                    info = {}
+                job = self._manual.replace_source(item_id, path, info.get("duration"))
+                self._js("onSourceReplaced", {
+                    "ok": True, "job": job, "item_id": item_id,
+                    "name": os.path.basename(path),
+                    "duration": info.get("duration"),
+                })
+            except Exception as exc:
+                traceback.print_exc()
+                self._js("onSourceReplaced", {"ok": False, "error": str(exc)})
+
+        return self._on_ui_thread(show)
+
+    def save_project(self, style):
+        """Writes the list, the edited text, the titles and the style to one file."""
+        def show():
+            try:
+                data = self._manual.export_project(style or {}, APP_VERSION)
+                suggested = "aisubs-проект"
+                items = data.get("items") or []
+                if items:
+                    suggested = os.path.splitext(items[0].get("name") or suggested)[0]
+                result = self._window.create_file_dialog(
+                    FileDialog.SAVE,
+                    directory=PROJECTS_DIR,
+                    save_filename=suggested + project_file.SUFFIX,
+                    file_types=("Проект AISubs (*.aisubs)", "Все файлы (*.*)"),
+                )
+                path = result[0] if isinstance(result, (list, tuple)) else result
+                if not path:
+                    return self._js("onProjectSaved", {"ok": False, "cancelled": True})
+                if not str(path).lower().endswith(project_file.SUFFIX):
+                    path = str(path) + project_file.SUFFIX
+                os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+                with open(path, "w", encoding="utf-8") as handle:
+                    json.dump(data, handle, ensure_ascii=False, indent=2)
+                self._js("onProjectSaved", {
+                    "ok": True, "path": path, "name": os.path.basename(path),
+                    "files": len(data.get("items") or []),
+                })
+            except Exception as exc:
+                traceback.print_exc()
+                self._js("onProjectSaved", {"ok": False, "error": str(exc)})
+
+        return self._on_ui_thread(show)
+
+    def open_project(self):
+        """Replaces the current list with a saved project."""
+        def show():
+            try:
+                result = self._window.create_file_dialog(
+                    FileDialog.OPEN,
+                    directory=PROJECTS_DIR,
+                    file_types=("Проект AISubs (*.aisubs)", "Все файлы (*.*)"),
+                )
+                path = result[0] if isinstance(result, (list, tuple)) else result
+                if not path:
+                    return self._js("onProjectOpened", {"ok": False, "cancelled": True})
+                with open(path, "r", encoding="utf-8") as handle:
+                    data = json.load(handle)
+                restored = self._manual.import_project(data, os.path.dirname(path))
+                self._js("onProjectOpened", {
+                    "ok": True, "path": path, "name": os.path.basename(path),
+                    "job": restored["job"], "style": restored["style"],
+                    "missing": restored["missing"],
+                })
+            except Exception as exc:
+                traceback.print_exc()
+                self._js("onProjectOpened", {"ok": False, "error": str(exc)})
+
+        return self._on_ui_thread(show)
 
     def _js_pump(self):
         """Serialises all JS calls onto one background thread.
@@ -378,7 +487,24 @@ class Api:
     # ---------- pipeline ----------
 
     def cancel_queue(self):
+        """Soft stop: the current file is finished, the queue behind it is dropped."""
         self._cancelled = True
+        return True
+
+    def render_queue_length(self):
+        with self._queue_lock:
+            return len(self._render_queue)
+
+    def stop_now(self):
+        """Hard stop: the file being processed is interrupted where it stands.
+
+        The queue is dropped too - a Stop that left the next file starting
+        would be a strange kind of stop.
+        """
+        self._aborted = True
+        self._cancelled = True
+        with self._queue_lock:
+            self._render_queue.clear()
         return True
 
     # ---------- workspace: one list of files, Transcribe -> edit -> Render ----------
@@ -442,33 +568,66 @@ class Api:
         }
         job_id = self._manual.workspace()["job_id"]
         item_ids = args.get("item_ids") or None
-        self._cancelled = False
+        self._cancelled = self._aborted = False
         started = self._start_worker(lambda: self._manual.run_transcription(
             job_id, selected_ids=item_ids, params=params,
             cancelled=lambda: self._cancelled,
+            abort=lambda: self._aborted,
         ))
         if not started:
             return {"ok": False, "error": "Дождитесь окончания текущей обработки"}
         return {"ok": True}
 
     def render(self, args):
-        """Renders the given files with the current style (default: all ready files)."""
+        """Queues a render pass with the current style and titles.
+
+        Pressing Render while one is running lines the new pass up behind it
+        instead of refusing: the second pass carries its own style and its own
+        copy of the titles, which is how one clip is made with a title and
+        without one in a single sitting.
+        """
         args = args or {}
         style = args.get("style") or {}
         item_ids = args.get("item_ids") or None
-        job_id = self._manual.workspace()["job_id"]
-        self._cancelled = False
+        job = self._manual.workspace()
+        wanted = set(item_ids) if item_ids else None
+        overlays = {
+            item["item_id"]: copy.deepcopy(item.get("overlays") or [])
+            for item in job["items"] if wanted is None or item["item_id"] in wanted
+        }
+        pass_ = {"job_id": job["job_id"], "style": style, "item_ids": item_ids,
+                 "overlays": overlays}
 
-        def work():
-            result = self._manual.run_render(
-                job_id, style, OUTPUT_DIR, selected_ids=item_ids,
-                cancelled=lambda: self._cancelled,
-            )
-            self._js("onRenderDone", result)
+        with self._queue_lock:
+            self._render_queue.append(pass_)
+            waiting = len(self._render_queue)
 
-        if not self._start_worker(work):
-            return {"ok": False, "error": "Дождитесь окончания текущей обработки"}
-        return {"ok": True}
+        def drain():
+            while True:
+                with self._queue_lock:
+                    if not self._render_queue:
+                        return
+                    current = self._render_queue.pop(0)
+                self._cancelled = self._aborted = False
+                result = self._manual.run_render(
+                    current["job_id"], current["style"], OUTPUT_DIR,
+                    selected_ids=current["item_ids"],
+                    cancelled=lambda: self._cancelled,
+                    abort=lambda: self._aborted,
+                    overlays_by_item=current["overlays"],
+                )
+                if self._aborted:
+                    # Stop means stop: whatever was lined up behind is dropped.
+                    with self._queue_lock:
+                        self._render_queue.clear()
+                with self._queue_lock:
+                    result["queued"] = len(self._render_queue)
+                self._js("onRenderDone", result)
+
+        if not self._start_worker(drain):
+            # A pass is already running; it will pick this one up when it ends.
+            return {"ok": True, "queued": waiting - 1}
+        return {"ok": True, "queued": 0}
 
     def retranscribe(self, item_id, args=None):
         """New transcript for one file with the current model settings, bypassing the cache."""
@@ -479,9 +638,10 @@ class Api:
             "language": args.get("language") or None,
             "use_cached_transcript": False,
         }
-        self._cancelled = False
+        self._cancelled = self._aborted = False
         started = self._start_worker(lambda: self._manual.retranscribe(
-            item_id, params=params, cancelled=lambda: self._cancelled
+            item_id, params=params, cancelled=lambda: self._cancelled,
+            abort=lambda: self._aborted,
         ))
         if not started:
             return {"ok": False, "error": "Дождитесь окончания текущей обработки"}
@@ -492,6 +652,38 @@ class Api:
         try:
             return {"ok": True, "job": self._manual.set_overlays(item_id, overlays or [])}
         except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def export_text(self, item_id):
+        """Saves the recognised text as a plain .txt next to the rendered files.
+
+        Not a subtitle format: sentences with their punctuation, paragraphs
+        where the speaker paused - the shape an article starts from.
+        """
+        try:
+            job = self._manual.workspace()
+            item = next((i for i in job["items"] if i["item_id"] == item_id), None)
+            if item is None:
+                return {"ok": False, "error": "файл не найден в списке"}
+            transcript = self._manual.get_transcript(item_id)
+            text = plain_text.build(transcript)
+            if not text.strip():
+                return {"ok": False, "error": "в этом файле нет распознанного текста"}
+
+            os.makedirs(OUTPUT_DIR, exist_ok=True)
+            stem = os.path.splitext(os.path.basename(item["path"]))[0]
+            path = os.path.join(OUTPUT_DIR, stem + ".txt")
+            suffix = 2
+            while os.path.exists(path):
+                path = os.path.join(OUTPUT_DIR, f"{stem}_{suffix}.txt")
+                suffix += 1
+            # utf-8-sig: Windows Notepad reads a plain utf-8 file as mojibake.
+            with open(path, "w", encoding="utf-8-sig") as handle:
+                handle.write(text + "\n")
+            return {"ok": True, "path": path, "name": os.path.basename(path),
+                    "characters": len(text)}
+        except Exception as exc:
+            traceback.print_exc()
             return {"ok": False, "error": str(exc)}
 
     def get_transcript(self, item_id):

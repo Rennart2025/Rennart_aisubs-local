@@ -11,6 +11,9 @@ import json
 import argparse
 import time
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+from cancellation import check as _check_abort
+
 
 def enable_bundled_cuda_libs():
     """Makes pip-installed CUDA libraries findable.
@@ -236,6 +239,7 @@ def transcribe(
     initial_prompt=None,
     models_dir=None,
     progress_cb=None,
+    abort=None,
 ):
     if models_dir is None:
         models_dir = os.path.join(os.path.dirname(__file__), "models", "whisper")
@@ -249,6 +253,7 @@ def transcribe(
         except Exception as e:
             print(f"[transcribe] pre-download failed ({e}), falling back to loader")
 
+    _check_abort(abort)
     if progress_cb:
         progress_cb("loading_model", 0)
 
@@ -270,7 +275,10 @@ def transcribe(
 
     duration = info.duration or 0
     segments = []
+    # faster-whisper decodes lazily, one segment per turn of this loop, so this
+    # is where a Stop during recognition actually takes effect.
     for seg in segments_iter:
+        _check_abort(abort)
         words = []
         for w in (seg.words or []):
             words.append({"word": w.word, "start": w.start, "end": w.end, "probability": w.probability})

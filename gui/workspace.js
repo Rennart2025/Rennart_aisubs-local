@@ -51,6 +51,14 @@ async function initWorkspace() {
   $("dropzone").addEventListener("click", pickVideos);
   $("clearListBtn").addEventListener("click", clearList);
   $("retranscribeBtn").addEventListener("click", () => retranscribe(selectedId));
+  $("exportTextBtn").addEventListener("click", exportText);
+  $("saveProjectBtn").addEventListener("click", saveProject);
+  $("replaceSourceBtn").addEventListener("click", replaceSource);
+  $("s_draft_render").addEventListener("change", () => {
+    $("draftToggle").classList.toggle("on", $("s_draft_render").checked);
+    updateActionButtons();
+  });
+  $("openProjectBtn").addEventListener("click", openProject);
   $("openResultBtn").addEventListener("click", () => {
     const item = selectedItem();
     if (item && item.output) api().open_output_folder(item.output);
@@ -90,6 +98,7 @@ function setupTitleFields() {
   titleRows().forEach((row) => {
     const text = row.querySelector(".title-text");
     const times = row.querySelectorAll(".title-time");
+    const shown = row.querySelector(".title-on");
     const index = Number(row.dataset.index);
 
     const touched = () => {
@@ -99,6 +108,7 @@ function setupTitleFields() {
       titleSaveTimer = setTimeout(saveTitles, 600);
     };
     text.addEventListener("input", touched);
+    shown.addEventListener("change", () => { markTitleProblems(); touched(); });
     times.forEach((input) => {
       input.addEventListener("input", touched);
       // The timings come from watching the video, so take them from there.
@@ -125,15 +135,24 @@ function readTitles() {
     text: row.querySelector(".title-text").value,
     start: Number(row.querySelector('[data-field="start"]').value) || 0,
     end: Number(row.querySelector('[data-field="end"]').value) || 0,
+    // Off means "keep the text, do not draw it" - neither in the preview nor
+    // in the video.
+    enabled: row.querySelector(".title-on").checked,
   }));
 }
 
+// A title nobody has touched yet gets a second of screen time, which is about
+// what a short line needs and saves typing the same two numbers every time.
+const DEFAULT_TITLE_SPAN = { start: 0, end: 1 };
+
 function fillTitleFields(overlays) {
   titleRows().forEach((row, index) => {
-    const overlay = (overlays || [])[index] || { text: "", start: 0, end: 0 };
+    const overlay = (overlays || [])[index] || { text: "", ...DEFAULT_TITLE_SPAN };
     row.querySelector(".title-text").value = overlay.text || "";
     row.querySelector('[data-field="start"]').value = Number(overlay.start || 0).toFixed(1);
     row.querySelector('[data-field="end"]').value = Number(overlay.end || 0).toFixed(1);
+    // Titles saved before the switch existed have no flag and are shown.
+    row.querySelector(".title-on").checked = overlay.enabled !== false;
   });
   markTitleProblems();
 }
@@ -142,7 +161,9 @@ function fillTitleFields(overlays) {
 function markTitleProblems() {
   titleRows().forEach((row) => {
     const overlay = readTitles()[Number(row.dataset.index)];
-    row.classList.toggle("bad", Boolean(overlay.text.trim()) && overlay.end <= overlay.start);
+    row.classList.toggle("off", !overlay.enabled);
+    row.classList.toggle("bad", overlay.enabled && Boolean(overlay.text.trim())
+      && overlay.end <= overlay.start);
   });
 }
 
@@ -165,7 +186,7 @@ function currentTitleTexts() {
   const time = video().currentTime;
   return readTitles().map((overlay, index) => {
     const text = (overlay.text || "").trim();
-    if (!text) return "";
+    if (!text || !overlay.enabled) return "";
     if (index === focusedTitleIndex) return overlay.text;
     const live = overlay.end > overlay.start && time >= overlay.start && time <= overlay.end;
     return live ? overlay.text : "";
@@ -237,7 +258,8 @@ window.onWorkspaceUpdated = function (snapshot) {
 
 window.onRenderDone = function (result) {
   const text = t("Рендер: готово {done}", { done: result.completed })
-    + (result.failed ? t(", ошибок {failed}", { failed: result.failed }) : "");
+    + (result.failed ? t(", ошибок {failed}", { failed: result.failed }) : "")
+    + (result.queued ? t(" · в очереди ещё: {n}", { n: result.queued }) : "");
   lastMessage = text;
   showToast(text, result.failed ? undefined : "ok");
   const done = ws && ws.items.filter((item) => item.output);
@@ -378,7 +400,9 @@ function updateActionButtons() {
   transcribe.title = actions.transcribe.ids.length
     ? t("Распознать речь во всех файлах, где текста ещё нет")
     : t("Все файлы уже распознаны");
-  render.querySelector(".label").textContent = actions.render.label;
+  render.querySelector(".label").textContent = actions.render.label
+    + ($("s_draft_render") && $("s_draft_render").checked ? " ½" : "");
+  // While a pass is running Render still works: it lines the next one up.
   render.disabled = !actions.render.enabled;
   render.title = actions.render.again
     ? t("Отрендерить выбранный файл ещё раз с текущим стилем")
@@ -390,6 +414,7 @@ function updateActionButtons() {
 
   $("runSummary").textContent = actions.summary;
   $("cancelBtn").classList.toggle("hidden", !actions.busy);
+  $("stopBtn").classList.toggle("hidden", !actions.busy);
   const anyOutput = ws && ws.items.some((item) => item.output);
   $("resultActions").classList.toggle("hidden", !anyOutput);
 }
@@ -493,10 +518,29 @@ async function loadStageMedia() {
 
 // ---------------- player ----------------
 
+function togglePlayback() {
+  const player = video();
+  if (!player.currentSrc) return;
+  if (player.paused) player.play().catch(() => {}); else player.pause();
+}
+
+// Space plays and pauses - unless it is being typed into a field, which is
+// most of this window: words, timings, titles, the preset name.
+function isTyping(element) {
+  if (!element) return false;
+  if (element.isContentEditable) return true;
+  const tag = element.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+}
+
 function setupPlayer() {
   const player = video();
-  $("playBtn").addEventListener("click", () => {
-    if (player.paused) player.play().catch(() => {}); else player.pause();
+  $("playBtn").addEventListener("click", togglePlayback);
+  document.addEventListener("keydown", (event) => {
+    if (event.code !== "Space" && event.key !== " ") return;
+    if (isTyping(event.target) || event.ctrlKey || event.altKey || event.metaKey) return;
+    event.preventDefault();      // иначе пробел прокручивает колонку
+    togglePlayback();
   });
   $("seekBar").addEventListener("input", () => {
     if (player.duration) player.currentTime = player.duration * $("seekBar").value / 1000;
@@ -621,12 +665,14 @@ function previewCaptions(transcript) {
   const key = JSON.stringify([
     selectedId, transcript.revision, mode, style.font, style.font_size, textCaseOf(style),
     style.max_width_ratio, style.line_count, style.highlight_style, style.box_padding_x,
+    Boolean(style.no_end_dots),
     style.stroke_width, previewVideo && previewVideo.width, window.fontEpoch || 0,
     transcript.words.map((w) => `${w.word}${w.deleted ? "~" : ""}${w.start}`).join("|"),
   ]);
   if (captionCache.key === key) return captionCache;
   const words = transcript.words.filter((word) => !word.deleted);
-  const captions = ManualState.buildCaptions(words, mode, captionFitter(), isHangingWord);
+  const captions = ManualState.buildCaptions(words, mode, captionFitter(), isHangingWord,
+    { noEndDots: Boolean(style.no_end_dots) });
   if (mode === "words") {
     // Same hold as segment_parser.one_word_captions: a word stays until the
     // next one when the pause is short.
@@ -639,7 +685,10 @@ function previewCaptions(transcript) {
     });
   }
   const byWord = new Map();
-  captions.forEach((caption, index) => caption.words.forEach((word) => byWord.set(word.id, index)));
+  // A caption word may stand for several transcript words once continuations
+  // are glued, and clicking any of them must find its caption.
+  captions.forEach((caption, index) => caption.words.forEach(
+    (word) => (word.ids || [word.id]).forEach((id) => byWord.set(id, index))));
   captionCache = { key, captions, byWord };
   return captionCache;
 }
@@ -662,10 +711,11 @@ function previewSample() {
     captions.forEach((caption, i) => { if (caption.words[0].start <= time) index = i; });
   }
   const caption = captions[index];
-  const active = Math.max(0, caption.words.findIndex((word) => word.id === activeWordId));
+  const active = Math.max(0, caption.words.findIndex(
+    (word) => (word.ids || [word.id]).includes(activeWordId)));
   const first = caption.words[0], last = caption.words[caption.words.length - 1];
   return {
-    words: caption.words.map((word) => word.text.trim()),
+    words: caption.words.map((word) => (word.display || word.text).trim()),
     active,
     // While playing, the render shows nothing between captions.
     hidden: !player.paused && (time < first.start - 0.05 || time > last.end + 0.05),
@@ -741,6 +791,7 @@ function updateEditorChrome() {
   box.classList.toggle("bad", bad > 0);
   box.textContent = reasons.join(" · ");
   $("retranscribeBtn").disabled = isRunning;
+  $("exportTextBtn").disabled = !item.revision;
   $("openResultBtn").classList.toggle("hidden", !item.output);
   if (!$("editorSaveState").textContent || item.state === "completed") {
     $("editorSaveState").textContent = item.state === "completed" ? t("отрендерено") : "";
@@ -967,9 +1018,110 @@ async function runRender() {
   }
   lastMessage = "";
   await saveTitles();
-  const payload = Object.assign({}, style, { title_styles: titleStyles });
+  const draft = $("s_draft_render").checked;
+  const payload = Object.assign({}, style, {
+    title_styles: titleStyles,
+    preview_scale: draft ? 0.5 : 1,
+  });
   const result = await api().render({ item_ids: actions.render.ids, style: payload });
-  if (!result || !result.ok) showToast((result && result.error) || t("Рендер не запущен"));
+  if (!result || !result.ok) return showToast((result && result.error) || t("Рендер не запущен"));
+  // Titles are copied at this moment, so the next pass can carry different ones.
+  if (result.queued) {
+    showToast(t("Поставлено в очередь рендера; впереди: {n}", { n: result.queued }), "ok");
+  } else if (draft) {
+    showToast(t("Черновой рендер: половина разрешения, файл с «_preview»"), "ok");
+  }
+}
+
+// Stop, in the hard sense: the file being processed is interrupted where it
+// stands. A half-written video is deleted rather than left in output/.
+async function stopNow() {
+  const button = $("stopBtn");
+  button.disabled = true;
+  button.textContent = t("Останавливаю…");
+  try {
+    await api().stop_now();
+    showToast(t("Останавливаю текущий файл"), "ok");
+  } finally {
+    setTimeout(() => {
+      button.disabled = false;
+      button.textContent = t("Stop");
+    }, 1500);
+  }
+}
+
+// ---------------- the work as a file ----------------
+
+async function saveProject() {
+  if (isRunning) return showToast(t("Дождитесь окончания обработки или остановите её"));
+  if (!ws || !ws.items.length) return showToast(t("Список пуст — сохранять нечего"));
+  await flushPatches();
+  await saveTitles();
+  const payload = Object.assign({}, style, { title_styles: titleStyles });
+  await api().save_project(payload);          // ответ придёт в onProjectSaved
+}
+
+async function openProject() {
+  if (isRunning) return showToast(t("Дождитесь окончания обработки или остановите её"));
+  if (ws && ws.items.length
+      && !window.confirm(t("Открыть проект? Текущий список файлов будет заменён."))) return;
+  await api().open_project();                 // ответ придёт в onProjectOpened
+}
+
+window.onProjectSaved = function (result) {
+  if (!result || result.cancelled) return;
+  if (!result.ok) return showToast(t("Не удалось сохранить проект: ") + t(result.error || "ошибка"));
+  showToast(t("Проект сохранён: {name}", { name: result.name }), "ok");
+};
+
+window.onProjectOpened = function (result) {
+  if (!result || result.cancelled) return;
+  if (!result.ok) return showToast(t("Не удалось открыть проект: ") + t(result.error || "ошибка"));
+  transcripts.clear();
+  captionCache = { key: null, captions: [], byWord: new Map() };
+  selectedId = null;
+  lastOutputPath = null;
+  if (result.style && typeof applySavedStyle === "function") applySavedStyle(result.style);
+  applySnapshot(result.job);
+  if (result.job.items.length) selectItem(result.job.items[0].item_id);
+  showToast(t("Проект открыт: {name}", { name: result.name }), "ok");
+  if (result.missing && result.missing.length) {
+    showToast(t("Не найдены файлы: ") + result.missing.join(", "));
+  }
+};
+
+// The same clip re-exported at another quality: the words still fit, so only
+// the file under them is swapped.
+async function replaceSource() {
+  const item = selectedItem();
+  if (!item) return showToast(t("Выберите видео в списке слева."));
+  if (isRunning) return showToast(t("Дождитесь окончания обработки или остановите её"));
+  await flushPatches();
+  await api().replace_source(item.item_id);     // ответ придёт в onSourceReplaced
+}
+
+window.onSourceReplaced = function (result) {
+  if (!result || result.cancelled) return;
+  if (!result.ok) return showToast(t("Не удалось заменить видео: ") + t(result.error || "ошибка"));
+  transcripts.delete(result.item_id);           // тайминги те же, а длительность могла смениться
+  captionCache = { key: null, captions: [], byWord: new Map() };
+  applySnapshot(result.job);
+  showingOutput = false;
+  loadStageMedia();
+  showToast(t("Видео заменено: {name}", { name: result.name }), "ok");
+};
+
+async function exportText() {
+  const item = selectedItem();
+  if (!item || !item.revision) return showToast(t("Сначала распознайте текст"));
+  await flushPatches();
+  const result = await api().export_text(item.item_id);
+  if (!result || !result.ok) {
+    return showToast(t("Не удалось сохранить текст: ") + t((result && result.error) || "ошибка"));
+  }
+  lastOutputPath = result.path;
+  showToast(t("Текст сохранён: {name}", { name: result.name }), "ok");
+  $("resultActions").classList.remove("hidden");
 }
 
 async function cancelCurrentQueue() {

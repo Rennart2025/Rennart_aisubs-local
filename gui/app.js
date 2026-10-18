@@ -103,6 +103,7 @@ const DEFAULT_STYLE = {
   box_radius: 16,
   box_padding_x: 20,
   box_padding_y: 10,
+  no_end_dots: false,
   line_count: 1,
   max_width_ratio: 0.86,
   line_spacing: 1.18,
@@ -142,9 +143,8 @@ const DEFAULT_TITLE_STYLE = {
   box_padding_y: 12,
   max_width_ratio: 0.86,
   line_spacing: 1.18,
-  position: "center",
-  position_margin: 190,
-  offset_x: 0,              // + вправо, − влево, в пикселях исходника
+  offset_x: 0,              // от центра кадра: + вправо, − влево, в пикселях исходника
+  offset_y: 0,              // от центра кадра: + вниз, − вверх
   anim_in_enabled: true,
   anim_in_kind: "fade",
   anim_in_ms: 400,
@@ -155,10 +155,13 @@ const DEFAULT_TITLE_STYLE = {
 
 // Titles for the first and the second slot: separate styles, so both can be
 // on screen at once in different places.
-const TITLE_SLOTS = [0, 1];
+const TITLE_SLOTS = [0, 1, 2];
+// Three titles that do not land on top of each other out of the box: two
+// near the top of a vertical frame, one near the bottom.
 const TITLE_DEFAULT_OVERRIDES = [
-  { position: "top", position_margin: 220 },
-  { position: "bottom", position_margin: 260 },
+  { offset_y: -700 },
+  { offset_y: -440 },
+  { offset_y: 560 },
 ];
 
 let style = Object.assign({}, DEFAULT_STYLE);
@@ -203,7 +206,7 @@ function bindRange(id, valId, key, fmt, scope) {
   el.addEventListener("input", () => {
     const raw = parseFloat(el.value);
     styleFor(scope)[key] = fmt ? fmt(raw) : raw;
-    $(valId).textContent = fmt ? Math.round(raw) : formatRangeValue(el, raw);
+    $(valId).value = fmt ? Math.round(raw) : formatRangeValue(el, raw);
     updatePreview();
     renderSafeZones();
   });
@@ -217,7 +220,7 @@ function bindOffset(id, valId, key, axis, scope) {
     const pair = offsetPair(target[key]);
     pair[axis] = parseFloat(el.value);
     target[key] = pair;
-    $(valId).textContent = pair[axis];
+    $(valId).value = pair[axis];
     updatePreview();
     renderSafeZones();
   });
@@ -225,6 +228,56 @@ function bindOffset(id, valId, key, axis, scope) {
 
 function offsetPair(value) {
   return Array.isArray(value) ? [Number(value[0]) || 0, Number(value[1]) || 0] : [0, 0];
+}
+
+// The number next to a slider is a field: type a value, press Enter or leave
+// the field, and the slider and the style follow. The field is paired with its
+// slider by id (v_font_size <-> s_font_size), so this needs no list to maintain.
+function setupValueFields(root) {
+  (root || document).querySelectorAll("input.range-val").forEach((field) => {
+    if (field.dataset.bound) return;
+    const slider = $(field.id.replace(/^v_/, "s_"));
+    if (!slider) return;
+    field.dataset.bound = "1";
+    // A text field, not type=number: a number field refuses "1,37", and a
+    // decimal comma is what a Russian keyboard types.
+    const commit = () => {
+      const typed = parseFloat(String(field.value).replace(/\s/g, "").replace(",", "."));
+      if (!isFinite(typed)) {
+        field.value = formatRangeValue(slider, parseFloat(slider.value));
+        return;
+      }
+      const value = Math.min(Number(slider.max), Math.max(Number(slider.min), typed));
+      // The slider snaps to its step; a typed value should not, so the step is
+      // lifted for the moment it takes to pass the value on.
+      const step = slider.step;
+      slider.step = "any";
+      slider.value = value;
+      slider.dispatchEvent(new Event("input", { bubbles: true }));
+      slider.step = step;
+      field.value = formatRangeValue(slider, value);
+    };
+    field.addEventListener("change", commit);
+    field.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+        // Arrows step by the slider's own step, Shift by ten of them.
+        event.preventDefault();
+        const step = Number(slider.step) || 1;
+        const current = parseFloat(String(field.value).replace(",", ".")) || Number(slider.value);
+        const delta = step * (event.shiftKey ? 10 : 1) * (event.key === "ArrowUp" ? 1 : -1);
+        field.value = formatRangeValue(slider, Math.round((current + delta) / step) * step);
+        commit();
+        return;
+      }
+      if (event.key === "Enter") { commit(); field.blur(); }
+      if (event.key === "Escape") {
+        field.value = formatRangeValue(slider, parseFloat(slider.value));
+        field.blur();
+      }
+    });
+    // Typing into the field is not a reason to toggle the details it sits in.
+    field.addEventListener("click", (event) => event.stopPropagation());
+  });
 }
 
 // A slider that moves in fractions keeps its decimals on screen, so 1.00 does
@@ -268,6 +321,10 @@ function setupBindings() {
   $("fontCyrillicOnly").addEventListener("change", renderFontOptions);
   bindRange("s_font_size", "v_font_size", "font_size");
   setupToggleGroup("textCaseGroup", (val) => { style.text_case = val; updatePreview(); });
+  $("s_no_end_dots").addEventListener("change", () => {
+    style.no_end_dots = $("s_no_end_dots").checked;
+    updatePreview();
+  });
   setupToggleGroup("captionModeGroup", (val) => {
     style.caption_mode = val;
     style.sentence_breaks = val === "sentences";   // what older builds read
@@ -311,7 +368,7 @@ function setupBindings() {
 
   $("s_position_margin").addEventListener("input", () => {
     style = SafeZones.activateManualPosition(style, parseFloat($("s_position_margin").value));
-    $("v_position_margin").textContent = style.position_margin;
+    $("v_position_margin").value = style.position_margin;
     updatePreview();
     renderSafeZones();
   });
@@ -383,23 +440,30 @@ function titlePanelMarkup(i) {
       <label>Шрифт</label>
       <select id="t${i}_font"></select>
 
-      <label>Размер шрифта <span class="range-val" id="v_t${i}_font_size">96</span></label>
-      <input type="range" id="s_t${i}_font_size" min="30" max="220" value="96">
+      <label>Размер шрифта <input type="text" inputmode="decimal" class="range-val" id="v_t${i}_font_size" value="96" aria-label="значение"></label>
+      <input type="range" id="s_t${i}_font_size" min="30" max="260" value="96">
 
-      <label>Цвет текста</label>
-      <div class="color-row">
-        <input type="color" id="s_t${i}_text_color" value="#ffffff">
-        <input type="text" id="s_t${i}_text_color_hex" value="#FFFFFF">
+      <div class="row">
+        <div>
+          <label>Цвет текста</label>
+          <div class="color-row">
+            <input type="color" id="s_t${i}_text_color" value="#ffffff">
+            <input type="text" id="s_t${i}_text_color_hex" value="#FFFFFF">
+          </div>
+        </div>
+        <div>
+          <label>Цвет обводки</label>
+          <div class="color-row">
+            <input type="color" id="s_t${i}_stroke_color" value="#000000">
+            <input type="text" id="s_t${i}_stroke_color_hex" value="#000000">
+          </div>
+        </div>
       </div>
     </div>
 
     <div class="section">
-      <label>Обводка <span class="range-val" id="v_t${i}_stroke_width">0</span></label>
+      <label>Обводка <input type="text" inputmode="decimal" class="range-val" id="v_t${i}_stroke_width" value="0" aria-label="значение"></label>
       <input type="range" id="s_t${i}_stroke_width" min="0" max="10" value="0">
-      <div class="color-row" style="margin-top:8px;">
-        <input type="color" id="s_t${i}_stroke_color" value="#000000">
-        <input type="text" id="s_t${i}_stroke_color_hex" value="#000000">
-      </div>
 
       <div class="switch-row">
         <label>Тень</label>
@@ -408,21 +472,21 @@ function titlePanelMarkup(i) {
       <div id="t${i}ShadowParams">
         <div class="row">
           <div>
-            <label>Размытие <span class="range-val" id="v_t${i}_shadow_blur">8</span></label>
+            <label>Размытие <input type="text" inputmode="decimal" class="range-val" id="v_t${i}_shadow_blur" value="8" aria-label="значение"></label>
             <input type="range" id="s_t${i}_shadow_blur" min="0" max="40" value="8">
           </div>
           <div>
-            <label>Прозрачность <span class="range-val" id="v_t${i}_shadow_opacity">55</span></label>
+            <label>Прозрачность <input type="text" inputmode="decimal" class="range-val" id="v_t${i}_shadow_opacity" value="55" aria-label="значение"></label>
             <input type="range" id="s_t${i}_shadow_opacity" min="0" max="100" value="55">
           </div>
         </div>
         <div class="row">
           <div>
-            <label>Offset X <span class="range-val" id="v_t${i}_shadow_offset_x">0</span></label>
+            <label>Offset X <input type="text" inputmode="decimal" class="range-val" id="v_t${i}_shadow_offset_x" value="0" aria-label="значение"></label>
             <input type="range" id="s_t${i}_shadow_offset_x" min="-40" max="40" value="0">
           </div>
           <div>
-            <label>Offset Y <span class="range-val" id="v_t${i}_shadow_offset_y">4</span></label>
+            <label>Offset Y <input type="text" inputmode="decimal" class="range-val" id="v_t${i}_shadow_offset_y" value="4" aria-label="значение"></label>
             <input type="range" id="s_t${i}_shadow_offset_y" min="-40" max="40" value="4">
           </div>
         </div>
@@ -435,21 +499,21 @@ function titlePanelMarkup(i) {
       <div id="t${i}Shadow2Params">
         <div class="row">
           <div>
-            <label>Размытие <span class="range-val" id="v_t${i}_shadow2_blur">18</span></label>
+            <label>Размытие <input type="text" inputmode="decimal" class="range-val" id="v_t${i}_shadow2_blur" value="18" aria-label="значение"></label>
             <input type="range" id="s_t${i}_shadow2_blur" min="0" max="40" value="18">
           </div>
           <div>
-            <label>Прозрачность <span class="range-val" id="v_t${i}_shadow2_opacity">35</span></label>
+            <label>Прозрачность <input type="text" inputmode="decimal" class="range-val" id="v_t${i}_shadow2_opacity" value="35" aria-label="значение"></label>
             <input type="range" id="s_t${i}_shadow2_opacity" min="0" max="100" value="35">
           </div>
         </div>
         <div class="row">
           <div>
-            <label>Offset X <span class="range-val" id="v_t${i}_shadow2_offset_x">0</span></label>
+            <label>Offset X <input type="text" inputmode="decimal" class="range-val" id="v_t${i}_shadow2_offset_x" value="0" aria-label="значение"></label>
             <input type="range" id="s_t${i}_shadow2_offset_x" min="-40" max="40" value="0">
           </div>
           <div>
-            <label>Offset Y <span class="range-val" id="v_t${i}_shadow2_offset_y">10</span></label>
+            <label>Offset Y <input type="text" inputmode="decimal" class="range-val" id="v_t${i}_shadow2_offset_y" value="10" aria-label="значение"></label>
             <input type="range" id="s_t${i}_shadow2_offset_y" min="-40" max="40" value="10">
           </div>
         </div>
@@ -476,15 +540,15 @@ function titlePanelMarkup(i) {
           <input type="color" id="s_t${i}_active_text_color" value="#ffffff">
           <input type="text" id="s_t${i}_active_text_color_hex" value="#FFFFFF">
         </div>
-        <label>Скругление <span class="range-val" id="v_t${i}_box_radius">16</span></label>
+        <label>Скругление <input type="text" inputmode="decimal" class="range-val" id="v_t${i}_box_radius" value="16" aria-label="значение"></label>
         <input type="range" id="s_t${i}_box_radius" min="0" max="50" value="16">
         <div class="row">
           <div>
-            <label>Отступ X <span class="range-val" id="v_t${i}_box_padding_x">24</span></label>
+            <label>Отступ X <input type="text" inputmode="decimal" class="range-val" id="v_t${i}_box_padding_x" value="24" aria-label="значение"></label>
             <input type="range" id="s_t${i}_box_padding_x" min="0" max="60" value="24">
           </div>
           <div>
-            <label>Отступ Y <span class="range-val" id="v_t${i}_box_padding_y">12</span></label>
+            <label>Отступ Y <input type="text" inputmode="decimal" class="range-val" id="v_t${i}_box_padding_y" value="12" aria-label="значение"></label>
             <input type="range" id="s_t${i}_box_padding_y" min="0" max="40" value="12">
           </div>
         </div>
@@ -500,25 +564,23 @@ function titlePanelMarkup(i) {
     </div>
 
     <div class="section">
-      <label>Позиция</label>
-      <div class="toggle-group" id="t${i}PositionGroup">
-        <button data-val="top">Верх</button>
-        <button data-val="center">Центр</button>
-        <button data-val="bottom">Низ</button>
+      <label>Сдвиг влево / вправо <input type="text" inputmode="decimal" class="range-val" id="v_t${i}_offset_x" value="0" aria-label="значение"></label>
+      <input type="range" id="s_t${i}_offset_x" min="-960" max="960" step="10" value="0">
+
+      <label>Сдвиг вверх / вниз <input type="text" inputmode="decimal" class="range-val" id="v_t${i}_offset_y" value="0" aria-label="значение"></label>
+      <input type="range" id="s_t${i}_offset_y" min="-960" max="960" step="10" value="0">
+      <div class="field-hint">Отсчёт от центра кадра: минус — влево и вверх, плюс — вправо и вниз. За край кадра заголовок не уедет: сдвиг останавливается у границы.</div>
+
+      <div class="row">
+        <div>
+          <label>Ширина блока <input type="text" inputmode="decimal" class="range-val" id="v_t${i}_max_width_ratio" value="86" aria-label="значение"></label>
+          <input type="range" id="s_t${i}_max_width_ratio" min="40" max="100" value="86">
+        </div>
+        <div>
+          <label>Межстрочный <input type="text" inputmode="decimal" class="range-val" id="v_t${i}_line_spacing" value="1.18" aria-label="значение"></label>
+          <input type="range" id="s_t${i}_line_spacing" min="0.8" max="2" step="0.02" value="1.18">
+        </div>
       </div>
-
-      <label>Отступ от края <span class="range-val" id="v_t${i}_position_margin">190</span></label>
-      <input type="range" id="s_t${i}_position_margin" min="20" max="960" value="190">
-
-      <label>Сдвиг влево / вправо <span class="range-val" id="v_t${i}_offset_x">0</span></label>
-      <input type="range" id="s_t${i}_offset_x" min="-600" max="600" step="10" value="0">
-      <div class="field-hint">0 — по центру кадра, минус влево, плюс вправо. За край кадра заголовок не уедет: сдвиг останавливается у границы.</div>
-
-      <label>Ширина блока <span class="range-val" id="v_t${i}_max_width_ratio">86</span></label>
-      <input type="range" id="s_t${i}_max_width_ratio" min="40" max="100" value="86">
-
-      <label>Межстрочный интервал <span class="range-val" id="v_t${i}_line_spacing">1.18</span></label>
-      <input type="range" id="s_t${i}_line_spacing" min="0.8" max="2" step="0.02" value="1.18">
     </div>
 
     <div class="section">
@@ -528,7 +590,7 @@ function titlePanelMarkup(i) {
       </div>
       <div id="t${i}AnimInParams">
         <select id="t${i}_anim_in_kind">${options("in")}</select>
-        <label>Длительность, мс <span class="range-val" id="v_t${i}_anim_in_ms">400</span></label>
+        <label>Длительность, мс <input type="text" inputmode="decimal" class="range-val" id="v_t${i}_anim_in_ms" value="400" aria-label="значение"></label>
         <input type="range" id="s_t${i}_anim_in_ms" min="80" max="2000" step="20" value="400">
       </div>
 
@@ -538,7 +600,7 @@ function titlePanelMarkup(i) {
       </div>
       <div id="t${i}AnimOutParams">
         <select id="t${i}_anim_out_kind">${options("out")}</select>
-        <label>Длительность, мс <span class="range-val" id="v_t${i}_anim_out_ms">400</span></label>
+        <label>Длительность, мс <input type="text" inputmode="decimal" class="range-val" id="v_t${i}_anim_out_ms" value="400" aria-label="значение"></label>
         <input type="range" id="s_t${i}_anim_out_ms" min="80" max="2000" step="20" value="400">
       </div>
       <div class="field-hint">Появление и исчезание никогда не занимают больше половины времени заголовка.</div>
@@ -550,6 +612,7 @@ function setupTitleBindings() {
     $(`titlePanel${i}`).innerHTML = titlePanelMarkup(i);
     window.I18n.apply($(`titlePanel${i}`));
     bindTitlePanel(i);
+    setupValueFields($(`titlePanel${i}`));
   });
 }
 
@@ -600,9 +663,8 @@ function bindTitlePanel(i) {
   bindRange(`s_t${i}_box_padding_y`, `v_t${i}_box_padding_y`, "box_padding_y", null, scope);
   bindColor(`s_t${i}_word_highlight_color`, `s_t${i}_word_highlight_color_hex`, "word_highlight_color", null, scope);
 
-  setupToggleGroup(`t${i}PositionGroup`, (val) => { target().position = val; updatePreview(); });
-  bindRange(`s_t${i}_position_margin`, `v_t${i}_position_margin`, "position_margin", null, scope);
   bindRange(`s_t${i}_offset_x`, `v_t${i}_offset_x`, "offset_x", null, scope);
+  bindRange(`s_t${i}_offset_y`, `v_t${i}_offset_y`, "offset_y", null, scope);
   bindRange(`s_t${i}_max_width_ratio`, `v_t${i}_max_width_ratio`, "max_width_ratio", (v) => v / 100, scope);
   bindRange(`s_t${i}_line_spacing`, `v_t${i}_line_spacing`, "line_spacing", null, scope);
 
@@ -633,53 +695,54 @@ function setupToggleGroup(groupId, onChange) {
 function applyStyleToControls() {
   // rebuild rather than assign: a preset may use a face the filter hides
   if (fontCatalog.length) renderFontOptions(); else $("s_font").value = style.font;
-  $("s_font_size").value = style.font_size; $("v_font_size").textContent = style.font_size;
+  $("s_font_size").value = style.font_size; $("v_font_size").value = style.font_size;
   setActiveToggle("textCaseGroup", textCaseOf(style));
   setActiveToggle("captionModeGroup", ManualState.captionModeOf(style));
   updateCaptionModeHint();
   $("s_text_color").value = style.text_color; $("s_text_color_hex").value = style.text_color.toUpperCase();
 
-  $("s_stroke_width").value = style.stroke_width; $("v_stroke_width").textContent = style.stroke_width;
+  $("s_stroke_width").value = style.stroke_width; $("v_stroke_width").value = style.stroke_width;
   $("s_stroke_color").value = style.stroke_color; $("s_stroke_color_hex").value = style.stroke_color.toUpperCase();
 
   $("s_shadow_enabled").checked = style.shadow_enabled;
   $("shadowParams").classList.toggle("hidden", !style.shadow_enabled);
-  $("s_shadow_blur").value = style.shadow_blur; $("v_shadow_blur").textContent = style.shadow_blur;
+  $("s_shadow_blur").value = style.shadow_blur; $("v_shadow_blur").value = style.shadow_blur;
   const shadowPct = Math.round(style.shadow_opacity * 100);
-  $("s_shadow_opacity").value = shadowPct; $("v_shadow_opacity").textContent = shadowPct;
+  $("s_shadow_opacity").value = shadowPct; $("v_shadow_opacity").value = shadowPct;
   const [sx, sy] = offsetPair(style.shadow_offset);
-  $("s_shadow_offset_x").value = sx; $("v_shadow_offset_x").textContent = sx;
-  $("s_shadow_offset_y").value = sy; $("v_shadow_offset_y").textContent = sy;
+  $("s_shadow_offset_x").value = sx; $("v_shadow_offset_x").value = sx;
+  $("s_shadow_offset_y").value = sy; $("v_shadow_offset_y").value = sy;
 
   $("s_shadow2_enabled").checked = Boolean(style.shadow2_enabled);
   $("shadow2Params").classList.toggle("hidden", !style.shadow2_enabled);
-  $("s_shadow2_blur").value = style.shadow2_blur; $("v_shadow2_blur").textContent = style.shadow2_blur;
+  $("s_shadow2_blur").value = style.shadow2_blur; $("v_shadow2_blur").value = style.shadow2_blur;
   const shadow2Pct = Math.round(style.shadow2_opacity * 100);
-  $("s_shadow2_opacity").value = shadow2Pct; $("v_shadow2_opacity").textContent = shadow2Pct;
+  $("s_shadow2_opacity").value = shadow2Pct; $("v_shadow2_opacity").value = shadow2Pct;
   const [s2x, s2y] = offsetPair(style.shadow2_offset);
-  $("s_shadow2_offset_x").value = s2x; $("v_shadow2_offset_x").textContent = s2x;
-  $("s_shadow2_offset_y").value = s2y; $("v_shadow2_offset_y").textContent = s2y;
+  $("s_shadow2_offset_x").value = s2x; $("v_shadow2_offset_x").value = s2x;
+  $("s_shadow2_offset_y").value = s2y; $("v_shadow2_offset_y").value = s2y;
 
   $("s_box_color").value = style.box_color; $("s_box_color_hex").value = style.box_color.toUpperCase();
   $("s_active_text_color").value = style.active_text_color; $("s_active_text_color_hex").value = style.active_text_color.toUpperCase();
-  $("s_box_radius").value = style.box_radius; $("v_box_radius").textContent = style.box_radius;
-  $("s_box_padding_x").value = style.box_padding_x; $("v_box_padding_x").textContent = style.box_padding_x;
-  $("s_box_padding_y").value = style.box_padding_y; $("v_box_padding_y").textContent = style.box_padding_y;
+  $("s_box_radius").value = style.box_radius; $("v_box_radius").value = style.box_radius;
+  $("s_box_padding_x").value = style.box_padding_x; $("v_box_padding_x").value = style.box_padding_x;
+  $("s_box_padding_y").value = style.box_padding_y; $("v_box_padding_y").value = style.box_padding_y;
 
   $("s_word_highlight_color").value = style.word_highlight_color; $("s_word_highlight_color_hex").value = style.word_highlight_color.toUpperCase();
 
   const sourceHeight = previewVideo && previewVideo.height;
   const effectiveMargin = SafeZones.effectiveMargin(style, sourceHeight);
-  $("s_position_margin").value = effectiveMargin; $("v_position_margin").textContent = effectiveMargin;
-  $("s_line_count").value = style.line_count; $("v_line_count").textContent = style.line_count;
+  $("s_position_margin").value = effectiveMargin; $("v_position_margin").value = effectiveMargin;
+  $("s_line_count").value = style.line_count; $("v_line_count").value = style.line_count;
+  $("s_no_end_dots").checked = Boolean(style.no_end_dots);
   const spacing = lineSpacingOf(style);
-  $("s_line_spacing").value = spacing; $("v_line_spacing").textContent = spacing.toFixed(2);
+  $("s_line_spacing").value = spacing; $("v_line_spacing").value = spacing.toFixed(2);
   const mwr = Math.round(style.max_width_ratio * 100);
-  $("s_max_width_ratio").value = mwr; $("v_max_width_ratio").textContent = mwr;
+  $("s_max_width_ratio").value = mwr; $("v_max_width_ratio").value = mwr;
 
   setActiveToggle("wordAnimationGroup", style.word_animation || "none");
   $("s_word_animation_ms").value = style.word_animation_ms;
-  $("v_word_animation_ms").textContent = style.word_animation_ms;
+  $("v_word_animation_ms").value = style.word_animation_ms;
   applyTitleControls();
 
   setActiveToggle("highlightStyleGroup", style.highlight_style);
@@ -706,11 +769,11 @@ function applyTitleControls() {
 function applyTitlePanel(i) {
   const t = titleStyles[i];
   if (fontCatalog.length) renderFontOptions(); else $(`t${i}_font`).value = t.font;
-  $(`s_t${i}_font_size`).value = t.font_size; $(`v_t${i}_font_size`).textContent = t.font_size;
+  $(`s_t${i}_font_size`).value = t.font_size; $(`v_t${i}_font_size`).value = t.font_size;
   $(`s_t${i}_text_color`).value = t.text_color;
   $(`s_t${i}_text_color_hex`).value = t.text_color.toUpperCase();
 
-  $(`s_t${i}_stroke_width`).value = t.stroke_width; $(`v_t${i}_stroke_width`).textContent = t.stroke_width;
+  $(`s_t${i}_stroke_width`).value = t.stroke_width; $(`v_t${i}_stroke_width`).value = t.stroke_width;
   $(`s_t${i}_stroke_color`).value = t.stroke_color;
   $(`s_t${i}_stroke_color_hex`).value = t.stroke_color.toUpperCase();
 
@@ -719,12 +782,12 @@ function applyTitlePanel(i) {
     $(`s_t${i}_${key}_enabled`).checked = enabled;
     $(`t${i}Shadow${suffix}Params`).classList.toggle("hidden", !enabled);
     $(`s_t${i}_${key}_blur`).value = t[`${key}_blur`];
-    $(`v_t${i}_${key}_blur`).textContent = t[`${key}_blur`];
+    $(`v_t${i}_${key}_blur`).value = t[`${key}_blur`];
     const pct = Math.round(t[`${key}_opacity`] * 100);
-    $(`s_t${i}_${key}_opacity`).value = pct; $(`v_t${i}_${key}_opacity`).textContent = pct;
+    $(`s_t${i}_${key}_opacity`).value = pct; $(`v_t${i}_${key}_opacity`).value = pct;
     const [x, y] = offsetPair(t[`${key}_offset`]);
-    $(`s_t${i}_${key}_offset_x`).value = x; $(`v_t${i}_${key}_offset_x`).textContent = x;
-    $(`s_t${i}_${key}_offset_y`).value = y; $(`v_t${i}_${key}_offset_y`).textContent = y;
+    $(`s_t${i}_${key}_offset_x`).value = x; $(`v_t${i}_${key}_offset_x`).value = x;
+    $(`s_t${i}_${key}_offset_y`).value = y; $(`v_t${i}_${key}_offset_y`).value = y;
   });
 
   setActiveToggle(`t${i}HighlightStyleGroup`, t.highlight_style);
@@ -733,21 +796,20 @@ function applyTitlePanel(i) {
   $(`s_t${i}_box_color`).value = t.box_color; $(`s_t${i}_box_color_hex`).value = t.box_color.toUpperCase();
   $(`s_t${i}_active_text_color`).value = t.active_text_color;
   $(`s_t${i}_active_text_color_hex`).value = t.active_text_color.toUpperCase();
-  $(`s_t${i}_box_radius`).value = t.box_radius; $(`v_t${i}_box_radius`).textContent = t.box_radius;
-  $(`s_t${i}_box_padding_x`).value = t.box_padding_x; $(`v_t${i}_box_padding_x`).textContent = t.box_padding_x;
-  $(`s_t${i}_box_padding_y`).value = t.box_padding_y; $(`v_t${i}_box_padding_y`).textContent = t.box_padding_y;
+  $(`s_t${i}_box_radius`).value = t.box_radius; $(`v_t${i}_box_radius`).value = t.box_radius;
+  $(`s_t${i}_box_padding_x`).value = t.box_padding_x; $(`v_t${i}_box_padding_x`).value = t.box_padding_x;
+  $(`s_t${i}_box_padding_y`).value = t.box_padding_y; $(`v_t${i}_box_padding_y`).value = t.box_padding_y;
   $(`s_t${i}_word_highlight_color`).value = t.word_highlight_color;
   $(`s_t${i}_word_highlight_color_hex`).value = t.word_highlight_color.toUpperCase();
 
-  setActiveToggle(`t${i}PositionGroup`, t.position);
-  $(`s_t${i}_position_margin`).value = t.position_margin;
-  $(`v_t${i}_position_margin`).textContent = t.position_margin;
   const offsetX = Number(t.offset_x) || 0;
-  $(`s_t${i}_offset_x`).value = offsetX; $(`v_t${i}_offset_x`).textContent = offsetX;
+  $(`s_t${i}_offset_x`).value = offsetX; $(`v_t${i}_offset_x`).value = offsetX;
+  const offsetY = Number(t.offset_y) || 0;
+  $(`s_t${i}_offset_y`).value = offsetY; $(`v_t${i}_offset_y`).value = offsetY;
   const width = Math.round(t.max_width_ratio * 100);
-  $(`s_t${i}_max_width_ratio`).value = width; $(`v_t${i}_max_width_ratio`).textContent = width;
+  $(`s_t${i}_max_width_ratio`).value = width; $(`v_t${i}_max_width_ratio`).value = width;
   const spacing = lineSpacingOf(t);
-  $(`s_t${i}_line_spacing`).value = spacing; $(`v_t${i}_line_spacing`).textContent = spacing.toFixed(2);
+  $(`s_t${i}_line_spacing`).value = spacing; $(`v_t${i}_line_spacing`).value = spacing.toFixed(2);
 
   ["in", "out"].forEach((phase) => {
     const block = phase === "in" ? "AnimIn" : "AnimOut";
@@ -756,7 +818,7 @@ function applyTitlePanel(i) {
     $(`t${i}${block}Params`).classList.toggle("hidden", !enabled);
     $(`t${i}_anim_${phase}_kind`).value = t[`anim_${phase}_kind`] || "fade";
     $(`s_t${i}_anim_${phase}_ms`).value = t[`anim_${phase}_ms`];
-    $(`v_t${i}_anim_${phase}_ms`).textContent = t[`anim_${phase}_ms`];
+    $(`v_t${i}_anim_${phase}_ms`).value = t[`anim_${phase}_ms`];
   });
 }
 
@@ -906,12 +968,10 @@ function drawTitleLine(i, text) {
     line.style.fontSize = size + "px";
   }
 
-  const margin = titleStyle.position_margin * scale;
+  // Same anchor as renderer.render_title_image: the centre of the frame,
+  // moved by offset_y and stopped at the edge.
   const height = line.offsetHeight;
-  let top;
-  if (titleStyle.position === "top") top = margin;
-  else if (titleStyle.position === "bottom") top = stage.clientHeight - margin - height;
-  else top = (stage.clientHeight - height) / 2;
+  const top = (stage.clientHeight - height) / 2 + (Number(titleStyle.offset_y) || 0) * scale;
   line.style.top = Math.max(0, Math.min(top, stage.clientHeight - height)) + "px";
 
   // The block is as wide as max_width_ratio, but only the text is visible, so
@@ -963,7 +1023,7 @@ function renderSafeZones() {
   const effectiveMargin = SafeZones.effectiveMargin(style, sourceHeight);
   range.max = SafeZones.marginRangeMax(sourceHeight, effectiveMargin);
   range.value = effectiveMargin;
-  $("v_position_margin").textContent = effectiveMargin;
+  $("v_position_margin").value = effectiveMargin;
 
   const snapButton = $("snapSafeZoneMargin");
   const canSnap = Boolean(previewVideo) && SafeZones.canSnapMargin(
@@ -1073,6 +1133,22 @@ async function loadPresets() {
   renderPresetGrid();
 }
 
+// A style as it comes back from a preset or from a project file: the subtitle
+// style and, when the file carries them, the two title styles.
+function applySavedStyle(saved) {
+  if (!saved || typeof saved !== "object") return;
+  style = Object.assign({}, DEFAULT_STYLE, saved);
+  delete style.title_style;
+  delete style.title_styles;
+  const titles = saved.title_styles || (saved.title_style ? [saved.title_style, saved.title_style] : null);
+  if (titles) {
+    titleStyles = TITLE_SLOTS.map((i) => Object.assign(
+      {}, DEFAULT_TITLE_STYLE, TITLE_DEFAULT_OVERRIDES[i], titles[i] || titles[0]));
+  }
+  applyStyleToControls();
+  updatePreview();
+}
+
 function renderPresetGrid() {
   const grid = $("presetGrid");
   grid.innerHTML = "";
@@ -1080,10 +1156,12 @@ function renderPresetGrid() {
     const card = document.createElement("div");
     card.className = "preset-card";
     card.title = p.name || p.filename;
-    const [family, weight] = fontCss(p.font);
-    const thumbColor = p.highlight_style === "box" ? p.box_color : p.word_highlight_color;
     card.innerHTML = `
-      <div class="preset-thumb"><span class="preset-sample">Аа</span></div>
+      <div class="preset-thumb">
+        <div class="preset-line title0"><span></span></div>
+        <div class="preset-line title1"><span></span></div>
+        <div class="preset-line subtitle"><i></i><span></span></div>
+      </div>
       <div class="preset-name">${p.name || p.filename}</div>
       <button class="preset-del" title="${t("Удалить пресет")}">×</button>
     `;
@@ -1091,31 +1169,16 @@ function renderPresetGrid() {
     // Styled through the DOM, not inside the markup: font stacks contain
     // quotes, and those terminate a style="..." attribute early, silently
     // dropping every declaration after the font name.
-    const sample = card.querySelector(".preset-sample");
-    sample.style.fontFamily = family;
-    sample.style.fontWeight = weight;
-    sample.style.fontSize = "15px";
-    sample.style.textTransform = textCaseOf(p) === "upper" ? "uppercase"
-      : textCaseOf(p) === "lower" ? "lowercase" : "none";
-    if (p.highlight_style === "box") {
-      sample.style.background = thumbColor;
-      sample.style.color = p.active_text_color;
-      sample.style.padding = "3px 8px";
-      sample.style.borderRadius = Math.min(p.box_radius, 10) + "px";
-    } else {
-      sample.style.color = thumbColor;
-    }
+    const titles = p.title_styles || (p.title_style ? [p.title_style, p.title_style] : []);
+    paintPresetLine(card.querySelector(".title0 span"), titleStyleOf(titles, 0), t("Заголовок"), 13);
+    paintPresetLine(card.querySelector(".title1 span"), titleStyleOf(titles, 1), t("второй"), 11);
+    // Субтитр показываем двумя словами: обычным и подсвеченным — иначе не
+    // видно ни базового цвета, ни плашки.
+    paintPresetLine(card.querySelector(".subtitle span"),
+      Object.assign({}, DEFAULT_STYLE, p), t("слово"), 12, true);
+
     card.addEventListener("click", () => {
-      style = Object.assign({}, DEFAULT_STYLE, p);
-      delete style.title_style;
-      delete style.title_styles;
-      const saved = p.title_styles || (p.title_style ? [p.title_style, p.title_style] : null);
-      if (saved) {
-        titleStyles = TITLE_SLOTS.map((i) => Object.assign(
-          {}, DEFAULT_TITLE_STYLE, TITLE_DEFAULT_OVERRIDES[i], saved[i] || saved[0]));
-      }
-      applyStyleToControls();
-      updatePreview();
+      applySavedStyle(p);
       document.querySelectorAll(".preset-card").forEach((c) => c.classList.remove("active"));
       card.classList.add("active");
     });
@@ -1125,6 +1188,51 @@ function renderPresetGrid() {
     });
     grid.appendChild(card);
   });
+}
+
+function titleStyleOf(saved, index) {
+  return Object.assign({}, DEFAULT_TITLE_STYLE, TITLE_DEFAULT_OVERRIDES[index],
+    (saved && (saved[index] || saved[0])) || {});
+}
+
+// One line of a preset thumbnail, drawn with the same rules as the preview:
+// font, case, colour, outline, both shadows and the plate under the word.
+// `highlighted` marks the subtitle line, where the plate sits under the word
+// being spoken rather than under the whole line.
+function paintPresetLine(span, from, text, size, highlighted) {
+  if (!span) return;
+  const line = span.parentElement;
+  const plain = line.querySelector("i");
+  if (plain) {
+    plain.textContent = t("текст") + " ";
+    plain.style.color = from.text_color;
+    plain.style.fontStyle = "normal";
+  }
+  const [family, weight, italic] = fontCss(from.font);
+  const scale = size / Math.max(20, Number(from.font_size) || 90);
+  const caseOf = textCaseOf(from);
+  span.textContent = text;
+  line.style.fontFamily = family;
+  line.style.fontWeight = weight;
+  line.style.fontStyle = italic ? "italic" : "normal";
+  line.style.fontSize = size + "px";
+  line.style.textTransform = caseOf === "upper" ? "uppercase"
+    : caseOf === "lower" ? "lowercase" : "none";
+  line.style.textShadow = previewShadows(Math.min(scale, 0.22), from);
+  // Обводка тоньше трёх четвертей пикселя на такой мелочи только пачкает
+  // буквы серым, поэтому её не рисуем — цвет текста важнее.
+  const stroke = from.stroke_width * scale;
+  line.style.setProperty("-webkit-text-stroke",
+    stroke >= 0.75 ? `${stroke.toFixed(1)}px ${from.stroke_color}` : "0px transparent");
+
+  const plate = from.highlight_style === "box";
+  span.style.background = plate ? from.box_color : "transparent";
+  span.style.color = plate ? from.active_text_color
+    : from.highlight_style === "color" ? from.word_highlight_color : from.text_color;
+  span.style.padding = plate ? `1px ${Math.max(3, from.box_padding_x * scale).toFixed(0)}px` : "0";
+  span.style.borderRadius = plate ? Math.min(8, from.box_radius * scale).toFixed(0) + "px" : "0";
+  // Без подсветки субтитр всё равно рисуется цветом текста, а не цветом слова.
+  if (highlighted && from.highlight_style === "none") span.style.color = from.text_color;
 }
 
 async function deletePreset(preset, card) {
@@ -1491,6 +1599,7 @@ async function refreshGpuBadge() {
 
 function init() {
   setupBindings();
+  setupValueFields(document);
   setupLanguageSwitch();
   if (typeof initWorkspace === "function") initWorkspace();
   applyStyleToControls();
